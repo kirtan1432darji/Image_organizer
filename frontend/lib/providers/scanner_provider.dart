@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:photo_manager/photo_manager.dart';
 import '../core/services/screenshot_scanner_service.dart';
-import '../core/services/database_service.dart';
 import '../models/screenshot_model.dart';
 import 'screenshot_provider.dart';
 
@@ -14,6 +14,7 @@ class ScannerState {
   final int totalProgress;
   final String statusMessage;
   final List<ScreenshotModel> newlyFound;
+  final bool isLimitedPermission;
 
   const ScannerState({
     this.isScanning = false,
@@ -21,6 +22,7 @@ class ScannerState {
     this.totalProgress = 0,
     this.statusMessage = 'Idle',
     this.newlyFound = const [],
+    this.isLimitedPermission = false,
   });
 
   ScannerState copyWith({
@@ -29,6 +31,7 @@ class ScannerState {
     int? totalProgress,
     String? statusMessage,
     List<ScreenshotModel>? newlyFound,
+    bool? isLimitedPermission,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
@@ -36,6 +39,7 @@ class ScannerState {
       totalProgress: totalProgress ?? this.totalProgress,
       statusMessage: statusMessage ?? this.statusMessage,
       newlyFound: newlyFound ?? this.newlyFound,
+      isLimitedPermission: isLimitedPermission ?? this.isLimitedPermission,
     );
   }
 }
@@ -43,9 +47,23 @@ class ScannerState {
 class ScannerNotifier extends StateNotifier<ScannerState> {
   final Ref _ref;
   final ScreenshotScannerService _scanner;
-  final DatabaseService _db;
 
-  ScannerNotifier(this._ref, this._scanner, this._db) : super(const ScannerState());
+  ScannerNotifier(this._ref, this._scanner) : super(const ScannerState()) {
+    _checkPermissionState();
+  }
+
+  Future<void> _checkPermissionState() async {
+    final ps = await _scanner.getPermissionState();
+    if (ps == PermissionState.limited) {
+      state = state.copyWith(isLimitedPermission: true);
+    }
+  }
+
+  Future<void> manageLimitedPhotos() async {
+    await _scanner.presentLimitedPhotoPicker();
+    // Re-scan after managing photos
+    await startScan();
+  }
 
   Future<void> startScan({bool onlyScreenshots = true}) async {
     if (state.isScanning) return;
@@ -54,9 +72,12 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
       isScanning: true,
       currentProgress: 0,
       totalProgress: 0,
-      statusMessage: 'Requesting gallery permissions...',
+      statusMessage: 'Scanning phone screenshots...',
       newlyFound: [],
     );
+
+    final ps = await _scanner.getPermissionState();
+    final isLimited = ps == PermissionState.limited;
 
     final result = await _scanner.scanScreenshots(
       onlyScreenshots: onlyScreenshots,
@@ -71,22 +92,26 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
 
     if (result.isSuccess) {
       final items = result.dataOrNull ?? [];
-      for (final item in items) {
-        await _db.insertScreenshot(item);
-      }
+      final repo = _ref.read(screenshotRepositoryProvider);
+      
+      await repo.saveScannedScreenshots(items);
 
       state = state.copyWith(
         isScanning: false,
-        statusMessage: 'Scan complete. Found ${items.length} screenshots.',
+        statusMessage: items.isEmpty
+            ? 'No screenshots found on device.'
+            : 'Scan complete. Indexed ${items.length} screenshots.',
         newlyFound: items,
+        isLimitedPermission: isLimited,
       );
 
-      // Refresh screenshot and stats list
-      _ref.read(screenshotListProvider.notifier).refresh();
+      // Refresh screenshot list
+      await _ref.read(screenshotListProvider.notifier).refresh();
     } else {
       state = state.copyWith(
         isScanning: false,
-        statusMessage: 'Scan failed: ${result.errorOrNull}',
+        statusMessage: result.errorOrNull ?? 'Scan failed',
+        isLimitedPermission: isLimited,
       );
     }
   }
@@ -94,6 +119,5 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
 
 final scannerProvider = StateNotifierProvider<ScannerNotifier, ScannerState>((ref) {
   final scanner = ref.watch(scannerServiceProvider);
-  final db = DatabaseService();
-  return ScannerNotifier(ref, scanner, db);
+  return ScannerNotifier(ref, scanner);
 });

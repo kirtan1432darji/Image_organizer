@@ -1,24 +1,25 @@
-﻿import 'dart:convert';
+import 'dart:async';
 import 'package:dio/dio.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/foundation.dart';
 import '../constants/api_constants.dart';
 import '../utils/result.dart';
-import '../../models/classification_result_model.dart';
+import 'auth_service.dart';
+import '../../models/auth_model.dart';
 import '../../models/category_model.dart';
-import '../../models/screenshot_model.dart';
+import '../../models/classification_result_model.dart';
+import '../../models/tag_model.dart';
 
 class ApiClient {
-  static final ApiClient _instance = ApiClient._internal();
-  factory ApiClient() => _instance;
-
   late final Dio _dio;
-  String _baseUrl = ApiConstants.defaultBaseUrl;
-  final _secureStorage = const FlutterSecureStorage();
-  String? _accessToken;
-  String? _refreshToken;
+  String _baseUrl;
+  final AuthService _authService;
+  bool _isRefreshing = false;
 
-  ApiClient._internal() {
+  ApiClient({
+    String baseUrl = ApiConstants.defaultBaseUrl,
+    AuthService? authService,
+  })  : _baseUrl = baseUrl,
+        _authService = authService ?? AuthService() {
     _dio = Dio(
       BaseOptions(
         baseUrl: _baseUrl,
@@ -28,7 +29,7 @@ class ApiClient {
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
-          'X-Client-Platform': 'Flutter',
+          'X-Client-Platform': 'Flutter-Mobile',
           'X-Client-Version': '1.0.0',
         },
       ),
@@ -36,30 +37,43 @@ class ApiClient {
 
     _dio.interceptors.add(
       InterceptorsWrapper(
-        onRequest: (options, handler) async {
-          options.headers['X-Request-Id'] = DateTime.now().millisecondsSinceEpoch.toString();
-          
-          _accessToken ??= await _secureStorage.read(key: 'jwt_access_token');
-          if (_accessToken != null && _accessToken!.isNotEmpty) {
-            options.headers['Authorization'] = 'Bearer $_accessToken';
+        onRequest: (options, handler) {
+          // 1. Inject Bearer token if available
+          final token = _authService.accessToken;
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
           }
+          options.headers['X-Request-Id'] = DateTime.now().millisecondsSinceEpoch.toString();
           return handler.next(options);
         },
         onResponse: (response, handler) {
           return handler.next(response);
         },
         onError: (DioException e, handler) async {
-          // Handle 401 Unauthorized - Attempt Token Refresh
-          if (e.response?.statusCode == 401 && _refreshToken != null) {
-            final refreshed = await _attemptTokenRefresh();
-            if (refreshed) {
-              final opts = e.requestOptions;
-              opts.headers['Authorization'] = 'Bearer $_accessToken';
+          // 2. Handle 401 Unauthorized with token refresh retry
+          if (e.response?.statusCode == 401 && !_isRefreshing) {
+            final refreshToken = _authService.refreshToken;
+            final accessToken = _authService.accessToken;
+            if (refreshToken != null && accessToken != null) {
+              _isRefreshing = true;
               try {
-                final cloneReq = await _dio.fetch(opts);
-                return handler.resolve(cloneReq);
-              } catch (retryError) {
-                return handler.next(e);
+                final refreshResult = await _performTokenRefresh(accessToken, refreshToken);
+                _isRefreshing = false;
+                if (refreshResult.isSuccess) {
+                  final newAuth = refreshResult.dataOrNull!;
+                  await _authService.saveAuth(newAuth);
+
+                  // Retry original request with new access token
+                  final opts = e.requestOptions;
+                  opts.headers['Authorization'] = 'Bearer ${newAuth.accessToken}';
+                  final cloneReq = await _dio.fetch(opts);
+                  return handler.resolve(cloneReq);
+                } else {
+                  await _authService.clearAuth();
+                }
+              } catch (_) {
+                _isRefreshing = false;
+                await _authService.clearAuth();
               }
             }
           }
@@ -67,240 +81,347 @@ class ApiClient {
         },
       ),
     );
-
-    _loadCustomBaseUrl();
-  }
-
-  Future<void> _loadCustomBaseUrl() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final customUrl = prefs.getString('custom_backend_url');
-      if (customUrl != null && customUrl.isNotEmpty) {
-        updateBaseUrl(customUrl);
-      }
-    } catch (_) {}
   }
 
   void updateBaseUrl(String newUrl) {
-    _baseUrl = newUrl.trim();
-    if (_baseUrl.endsWith('/')) {
-      _baseUrl = _baseUrl.substring(0, _baseUrl.length - 1);
+    var trimmed = newUrl.trim();
+    if (trimmed.endsWith('/')) {
+      trimmed = trimmed.substring(0, trimmed.length - 1);
     }
-    if (!_baseUrl.endsWith('/api')) {
-      _baseUrl = '$_baseUrl/api';
-    }
-    _dio.options.baseUrl = _baseUrl;
+    _baseUrl = trimmed;
+    _dio.options.baseUrl = trimmed;
   }
 
   String get baseUrl => _baseUrl;
 
-  Future<void> setAuthTokens(String accessToken, String refreshToken) async {
-    _accessToken = accessToken;
-    _refreshToken = refreshToken;
-    await _secureStorage.write(key: 'jwt_access_token', value: accessToken);
-    await _secureStorage.write(key: 'jwt_refresh_token', value: refreshToken);
-  }
-
-  Future<void> clearAuthTokens() async {
-    _accessToken = null;
-    _refreshToken = null;
-    await _secureStorage.delete(key: 'jwt_access_token');
-    await _secureStorage.delete(key: 'jwt_refresh_token');
-  }
-
-  Future<bool> _attemptTokenRefresh() async {
-    try {
-      final token = await _secureStorage.read(key: 'jwt_refresh_token');
-      if (token == null) return false;
-
-      final response = await Dio(BaseOptions(baseUrl: _baseUrl)).post(
-        '/auth/refresh',
-        data: {'refresh_token': token},
-      );
-
-      if (response.statusCode == 200 && response.data != null) {
-        final data = _unwrapData(response.data);
-        if (data != null && data['access_token'] != null) {
-          await setAuthTokens(data['access_token'] as String, data['refresh_token'] as String);
-          return true;
-        }
-      }
-    } catch (_) {}
-    return false;
-  }
-
+  /// Helper to safely unwrap standard backend ApiResponse envelope: { success, message, data, errors }
   dynamic _unwrapData(dynamic responseData) {
     if (responseData is Map<String, dynamic>) {
-      if (responseData.containsKey('data') && responseData['data'] != null) {
+      if (responseData.containsKey('data')) {
         return responseData['data'];
       }
     }
     return responseData;
   }
 
-  /// Authentication: Register or Login
-  Future<Result<Map<String, dynamic>>> login(String email, String password) async {
-    try {
-      final response = await _dio.post('/auth/login', data: {
-        'email': email,
-        'password': password,
-      });
-      final data = _unwrapData(response.data);
-      if (data != null && data['access_token'] != null) {
-        await setAuthTokens(data['access_token'] as String, data['refresh_token'] as String);
-        return Result.success(Map<String, dynamic>.from(data as Map));
-      }
-      return Result.failure('Invalid login response');
-    } on DioException catch (e) {
-      return _handleDioError(e);
-    }
-  }
+  // ==================== AUTHENTICATION ====================
 
-  Future<Result<Map<String, dynamic>>> register(String name, String email, String password) async {
+  Future<Result<AuthResponseModel>> login({
+    required String emailOrUsername,
+    required String password,
+  }) async {
     try {
-      final response = await _dio.post('/auth/register', data: {
-        'name': name,
-        'email': email,
-        'password': password,
-      });
-      final data = _unwrapData(response.data);
-      if (data != null && data['access_token'] != null) {
-        await setAuthTokens(data['access_token'] as String, data['refresh_token'] as String);
-        return Result.success(Map<String, dynamic>.from(data as Map));
-      }
-      return Result.failure('Invalid register response');
-    } on DioException catch (e) {
-      return _handleDioError(e);
-    }
-  }
+      final response = await _dio.post(
+        ApiConstants.authLogin,
+        data: {
+          'emailOrUsername': emailOrUsername,
+          'password': password,
+        },
+      );
 
-  /// Batch Scan & Upsert Screenshot Metadata
-  Future<Result<List<ScreenshotModel>>> batchScanScreenshots(List<ScreenshotModel> screenshots) async {
-    try {
-      final payload = {
-        'screenshots': screenshots.map((s) => {
-          'device_asset_id': s.deviceAssetId,
-          'image_id': s.deviceAssetId,
-          'file_path': s.filePath,
-          'image_path': s.filePath,
-          'file_name': s.fileName,
-          'file_size': s.fileSize,
-          'width': s.width,
-          'height': s.height,
-          'captured_date': s.createdAt.toIso8601String(),
-          'source_app': s.sourceApp,
-          'ocr_text': s.ocrText,
-          'is_favorite': s.isFavorite,
-          'is_reviewed': s.isReviewed,
-          'is_mock': s.isMock,
-        }).toList()
-      };
-
-      final response = await _dio.post('/screenshots/batch', data: payload);
-      if (response.statusCode == 200) {
-        final data = _unwrapData(response.data);
-        final list = (data['screenshots'] as List<dynamic>?) ?? [];
-        final models = list.map((m) => ScreenshotModel.fromJson(m as Map<String, dynamic>)).toList();
-        return Result.success(models);
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        final auth = AuthResponseModel.fromJson(unwrapped);
+        await _authService.saveAuth(auth);
+        return Result.success(auth);
       }
-      return Result.failure('Batch scan failed: ${response.statusCode}');
+      return Result.failure('Invalid login response format');
     } on DioException catch (e) {
-      return _handleDioError(e);
+      return _handleDioError<AuthResponseModel>(e);
     } catch (e) {
-      return Result.failure('Unexpected error: $e');
+      return Result.failure('Login failed: $e');
     }
   }
 
-  /// Classify a single screenshot
+  Future<Result<AuthResponseModel>> register({
+    required String username,
+    required String email,
+    required String password,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.authRegister,
+        data: {
+          'username': username,
+          'email': email,
+          'password': password,
+        },
+      );
+
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        final auth = AuthResponseModel.fromJson(unwrapped);
+        await _authService.saveAuth(auth);
+        return Result.success(auth);
+      }
+      return Result.failure('Invalid registration response');
+    } on DioException catch (e) {
+      return _handleDioError<AuthResponseModel>(e);
+    } catch (e) {
+      return Result.failure('Registration failed: $e');
+    }
+  }
+
+  Future<Result<AuthResponseModel>> _performTokenRefresh(String token, String refreshToken) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.authRefresh,
+        data: {
+          'accessToken': token,
+          'refreshToken': refreshToken,
+        },
+      );
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(AuthResponseModel.fromJson(unwrapped));
+      }
+      return Result.failure('Refresh token failed');
+    } catch (e) {
+      return Result.failure('Token refresh error: $e');
+    }
+  }
+
+  Future<void> logout() async {
+    try {
+      final rToken = _authService.refreshToken;
+      if (rToken != null) {
+        await _dio.post(ApiConstants.authLogout, data: {'refreshToken': rToken});
+      }
+    } catch (_) {}
+    await _authService.clearAuth();
+  }
+
+  // ==================== SCREENSHOT SCAN & INDEXING ====================
+
+  /// Scan & index a single screenshot metadata on the backend (with server-side classification)
+  Future<Result<Map<String, dynamic>>> scanScreenshotMetadata({
+    required String imageId, // Device asset ID
+    required String imagePath,
+    String? thumbnailPath,
+    required DateTime capturedDate,
+    required String sourceApp,
+    required int width,
+    required int height,
+    required String ocrText,
+    String? visionDescription,
+    bool autoClassify = true,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.scanScreenshot,
+        data: {
+          'imageId': imageId,
+          'imagePath': imagePath,
+          'thumbnailPath': thumbnailPath,
+          'capturedDate': capturedDate.toIso8601String(),
+          'sourceApp': sourceApp,
+          'width': width,
+          'height': height,
+          'ocrText': ocrText,
+          'visionDescription': visionDescription,
+          'autoClassify': autoClassify,
+        },
+      );
+
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(unwrapped);
+      }
+      return Result.failure('Unexpected scan response structure');
+    } on DioException catch (e) {
+      return _handleDioError<Map<String, dynamic>>(e);
+    } catch (e) {
+      return Result.failure('Scan upload error: $e');
+    }
+  }
+
+  /// Batch scan multiple screenshot metadata items
+  Future<Result<List<Map<String, dynamic>>>> batchScanScreenshots(
+    List<Map<String, dynamic>> items,
+  ) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.batchScan,
+        data: {'items': items},
+      );
+
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is List) {
+        return Result.success(unwrapped.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      } else if (unwrapped is Map && unwrapped['results'] is List) {
+        final list = unwrapped['results'] as List;
+        return Result.success(list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      }
+      return Result.success([]);
+    } on DioException catch (e) {
+      return _handleDioError<List<Map<String, dynamic>>>(e);
+    } catch (e) {
+      return Result.failure('Batch scan error: $e');
+    }
+  }
+
+  /// Classify screenshot OCR text via AI backend
   Future<Result<ClassificationResultModel>> classifyScreenshot({
     required String screenshotId,
     required String fileName,
     required String ocrText,
     String? existingCategory,
+    String sourceApp = '',
   }) async {
     try {
       final response = await _dio.post(
         ApiConstants.classifyScreenshot,
         data: {
-          'screenshot_id': screenshotId,
-          'file_name': fileName,
-          'ocr_text': ocrText,
-          'existing_category': existingCategory,
+          'ocrText': ocrText,
+          'sourceApp': sourceApp,
+          'screenshotId': screenshotId,
+          'fileName': fileName,
         },
       );
 
-      if (response.statusCode == 200 && response.data != null) {
-        final data = _unwrapData(response.data);
-        return Result.success(ClassificationResultModel.fromJson(data as Map<String, dynamic>));
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(ClassificationResultModel.fromJson(unwrapped));
       }
-      return Result.failure('Server returned code: ${response.statusCode}');
+      return Result.failure('Invalid classification response');
     } on DioException catch (e) {
       return _handleDioError<ClassificationResultModel>(e);
     } catch (e) {
-      return Result.failure('Unexpected error: $e');
+      return Result.failure('Classification error: $e');
     }
   }
 
-  /// Batch classify multiple screenshot OCR records
-  Future<Result<List<ClassificationResultModel>>> batchClassifyScreenshots(
-    List<Map<String, dynamic>> items,
-  ) async {
+  /// Fetch paged screenshots from ASP.NET Core backend
+  Future<Result<List<Map<String, dynamic>>>> fetchScreenshots({
+    String? categoryId,
+    String? subCategoryId,
+    String? tag,
+    String? sourceApp,
+    bool? isFavorite,
+    bool? isReviewed,
+    bool? needsReview,
+    String? searchTerm,
+    int pageNumber = 1,
+    int pageSize = 50,
+  }) async {
     try {
-      final response = await _dio.post(
-        ApiConstants.batchClassify,
-        data: {'items': items},
+      final response = await _dio.get(
+        ApiConstants.screenshots,
+        queryParameters: {
+          if (categoryId != null && categoryId != 'all') 'categoryId': categoryId,
+          if (subCategoryId != null) 'subCategoryId': subCategoryId,
+          if (tag != null) 'tag': tag,
+          if (sourceApp != null) 'sourceApp': sourceApp,
+          if (isFavorite != null) 'isFavorite': isFavorite,
+          if (isReviewed != null) 'isReviewed': isReviewed,
+          if (needsReview != null) 'needsReview': needsReview,
+          if (searchTerm != null && searchTerm.isNotEmpty) 'searchTerm': searchTerm,
+          'pageNumber': pageNumber,
+          'pageSize': pageSize,
+        },
       );
 
-      if (response.statusCode == 200 && response.data != null) {
-        final data = _unwrapData(response.data);
-        final list = (data['results'] as List<dynamic>?) ?? [];
-        final results = list
-            .map((item) => ClassificationResultModel.fromJson(item as Map<String, dynamic>))
-            .toList();
-        return Result.success(results);
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map && unwrapped['items'] is List) {
+        final list = unwrapped['items'] as List;
+        return Result.success(list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      } else if (unwrapped is List) {
+        return Result.success(unwrapped.map((e) => Map<String, dynamic>.from(e as Map)).toList());
       }
-      return Result.failure('Batch classification failed: ${response.statusCode}');
+      return Result.success([]);
     } on DioException catch (e) {
-      return _handleDioError<List<ClassificationResultModel>>(e);
+      return _handleDioError<List<Map<String, dynamic>>>(e);
     } catch (e) {
-      return Result.failure('Unexpected error: $e');
+      return Result.failure('Failed to fetch screenshots: $e');
     }
   }
 
-  /// Toggle Favorite
-  Future<Result<bool>> toggleFavorite(String id, bool isFavorite) async {
+  /// Update screenshot metadata on backend
+  Future<Result<bool>> updateScreenshot({
+    required String id,
+    String? categoryId,
+    String? subCategoryId,
+    List<String>? tags,
+    bool? isFavorite,
+  }) async {
     try {
-      final response = await _dio.patch('/screenshots/$id/favorite?isFavorite=$isFavorite');
-      final data = _unwrapData(response.data);
-      return Result.success(data == true || data == 1);
+      await _dio.put(
+        '${ApiConstants.screenshots}/$id',
+        data: {
+          if (categoryId != null) 'categoryId': categoryId,
+          if (subCategoryId != null) 'subCategoryId': subCategoryId,
+          if (tags != null) 'tags': tags,
+          if (isFavorite != null) 'isFavorite': isFavorite,
+        },
+      );
+      return Result.success(true);
     } on DioException catch (e) {
-      return _handleDioError(e);
+      return _handleDioError<bool>(e);
+    } catch (e) {
+      return Result.failure('Update failed: $e');
     }
   }
 
-  /// Mark Reviewed
-  Future<Result<bool>> markReviewed(String id, [bool isReviewed = true]) async {
+  /// Toggle favorite on backend
+  Future<Result<bool>> toggleFavorite(String id, [bool? isFavorite]) async {
     try {
-      final response = await _dio.patch('/screenshots/$id/review?isReviewed=$isReviewed');
-      final data = _unwrapData(response.data);
-      return Result.success(data == true || data == 1);
+      final response = await _dio.patch(
+        '${ApiConstants.screenshots}/$id/favorite',
+        queryParameters: {
+          if (isFavorite != null) 'isFavorite': isFavorite,
+        },
+      );
+      final unwrapped = _unwrapData(response.data);
+      return Result.success(unwrapped == true);
     } on DioException catch (e) {
-      return _handleDioError(e);
+      return _handleDioError<bool>(e);
+    } catch (e) {
+      return Result.failure('Toggle favorite failed: $e');
     }
   }
 
-  /// Fetch remote categories
+  /// Toggle review on backend
+  Future<Result<bool>> toggleReview(String id, [bool? isReviewed]) async {
+    try {
+      final response = await _dio.patch(
+        '${ApiConstants.screenshots}/$id/review',
+        queryParameters: {
+          if (isReviewed != null) 'isReviewed': isReviewed,
+        },
+      );
+      final unwrapped = _unwrapData(response.data);
+      return Result.success(unwrapped == true);
+    } on DioException catch (e) {
+      return _handleDioError<bool>(e);
+    } catch (e) {
+      return Result.failure('Toggle review failed: $e');
+    }
+  }
+
+  /// Delete screenshot metadata on backend
+  Future<Result<bool>> deleteScreenshot(String id) async {
+    try {
+      await _dio.delete('${ApiConstants.screenshots}/$id');
+      return Result.success(true);
+    } on DioException catch (e) {
+      return _handleDioError<bool>(e);
+    } catch (e) {
+      return Result.failure('Delete failed: $e');
+    }
+  }
+
+  /// Fetch remote category definitions from ASP.NET Core backend
   Future<Result<List<CategoryModel>>> fetchCategories() async {
     try {
       final response = await _dio.get(ApiConstants.categories);
-      if (response.statusCode == 200 && response.data != null) {
-        final list = _unwrapData(response.data) as List;
-        final categories = list
-            .map((e) => CategoryModel.fromJson(e as Map<String, dynamic>))
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is List) {
+        final categories = unwrapped
+            .map((e) => CategoryModel.fromJson(Map<String, dynamic>.from(e as Map)))
             .toList();
         return Result.success(categories);
       }
-      return Result.failure('Failed to fetch categories: ${response.statusCode}');
+      return Result.success([]);
     } on DioException catch (e) {
       return _handleDioError<List<CategoryModel>>(e);
     } catch (e) {
@@ -308,7 +429,45 @@ class ApiClient {
     }
   }
 
-  /// Check backend connectivity & SQL Server status
+  /// Fetch remote tag definitions from ASP.NET Core backend
+  Future<Result<List<TagModel>>> fetchTags() async {
+    try {
+      final response = await _dio.get(ApiConstants.tags);
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is List) {
+        final tags = unwrapped
+            .map((e) => TagModel.fromJson(Map<String, dynamic>.from(e as Map)))
+            .toList();
+        return Result.success(tags);
+      }
+      return Result.success([]);
+    } on DioException catch (e) {
+      return _handleDioError<List<TagModel>>(e);
+    } catch (e) {
+      return Result.failure('Error fetching tags: $e');
+    }
+  }
+
+  /// Sync offline changes with backend
+  Future<Result<Map<String, dynamic>>> syncMetadata(Map<String, dynamic> syncPayload) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.sync,
+        data: syncPayload,
+      );
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(unwrapped);
+      }
+      return Result.success({});
+    } on DioException catch (e) {
+      return _handleDioError<Map<String, dynamic>>(e);
+    } catch (e) {
+      return Result.failure('Sync error: $e');
+    }
+  }
+
+  /// Check backend connectivity
   Future<bool> checkHealth() async {
     try {
       final response = await _dio.get(
@@ -327,17 +486,24 @@ class ApiClient {
       case DioExceptionType.connectionTimeout:
       case DioExceptionType.sendTimeout:
       case DioExceptionType.receiveTimeout:
-        errorMsg = 'Connection timed out. Server is unreachable.';
+        errorMsg = 'Connection timed out. Backend is unreachable at $_baseUrl.';
         break;
       case DioExceptionType.badResponse:
-        errorMsg = 'Server error (${e.response?.statusCode}): ${e.response?.statusMessage}';
+        final status = e.response?.statusCode;
+        final resData = e.response?.data;
+        if (resData is Map && resData['message'] != null) {
+          errorMsg = resData['message'].toString();
+        } else {
+          errorMsg = 'Server returned error ($status).';
+        }
         break;
       case DioExceptionType.connectionError:
-        errorMsg = 'Cannot connect to ASP.NET Core backend at $_baseUrl. Check your network.';
+        errorMsg = 'Cannot connect to backend at $_baseUrl. Check network / IP.';
         break;
       default:
         errorMsg = e.message ?? 'Unknown network error';
     }
+    debugPrint('[ApiClient Error] $errorMsg (URL: ${e.requestOptions.uri})');
     return Result.failure(errorMsg, e);
   }
 }

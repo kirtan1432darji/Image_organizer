@@ -1,4 +1,4 @@
-﻿using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Models;
 using Serilog;
 using System.Threading.RateLimiting;
 using AI.ScreenshotOrganizer.API.Filters;
@@ -102,7 +102,10 @@ if (app.Environment.IsDevelopment())
     });
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors("MobileAppPolicy");
 app.UseRateLimiter();
 

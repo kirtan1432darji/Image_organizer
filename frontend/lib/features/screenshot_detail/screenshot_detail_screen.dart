@@ -187,6 +187,7 @@ class _ScreenshotDetailScreenState
                           child: ScreenshotImageThumbnail(
                             screenshot: item,
                             fit: BoxFit.contain,
+                            isOriginal: true,
                           ),
                         ),
                       ),

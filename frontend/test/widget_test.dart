@@ -18,5 +18,6 @@ void main() {
       ),
     );
     expect(find.byType(AiScreenshotOrganizerApp), findsOneWidget);
+    await tester.pumpAndSettle(const Duration(seconds: 3));
   });
 }
