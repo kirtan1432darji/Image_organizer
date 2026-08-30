@@ -1,0 +1,6 @@
+@AI.ScreenshotOrganizer.API_HostAddress = http://localhost:5186
+
+GET {{AI.ScreenshotOrganizer.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
