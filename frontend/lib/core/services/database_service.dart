@@ -193,6 +193,51 @@ class DatabaseService {
     return screenshots;
   }
 
+  Future<void> purgeMockScreenshots() async {
+    final db = await database;
+    await db.delete(
+      'screenshots',
+      where: "file_path LIKE 'assets/mock_screenshots%' OR is_mock = 1",
+    );
+  }
+
+  Future<ScreenshotModel?> getScreenshotByDeviceAssetId(String deviceAssetId) async {
+    if (deviceAssetId.isEmpty) return null;
+    final db = await database;
+    final maps = await db.query(
+      'screenshots',
+      where: 'device_asset_id = ?',
+      whereArgs: [deviceAssetId],
+      limit: 1,
+    );
+
+    if (maps.isEmpty) return null;
+    final tags = await getTagsForScreenshot(maps.first['id'] as String);
+    return ScreenshotModel.fromMap(maps.first, tags);
+  }
+
+  Future<void> upsertScreenshot(ScreenshotModel screenshot) async {
+    final existing = await getScreenshotByDeviceAssetId(screenshot.deviceAssetId);
+    
+    if (existing == null) {
+      await insertScreenshot(screenshot);
+    } else {
+      // Merge with existing record
+      final merged = screenshot.copyWith(
+        id: existing.id,
+        categoryId: screenshot.categoryId != 'unsorted' ? screenshot.categoryId : existing.categoryId,
+        categoryName: screenshot.categoryId != 'unsorted' ? screenshot.categoryName : existing.categoryName,
+        subcategory: screenshot.subcategory.isNotEmpty ? screenshot.subcategory : existing.subcategory,
+        confidence: screenshot.confidence > 0 ? screenshot.confidence : existing.confidence,
+        isFavorite: existing.isFavorite,
+        isReviewed: existing.isReviewed,
+        ocrText: screenshot.ocrText ?? existing.ocrText,
+        tags: screenshot.tags.isNotEmpty ? screenshot.tags : existing.tags,
+      );
+      await updateScreenshot(merged);
+    }
+  }
+
   Future<ScreenshotModel?> getScreenshotById(String id) async {
     final db = await database;
     final maps = await db.query(
@@ -422,11 +467,6 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
-  }
-
-  Future<void> purgeMockScreenshots() async {
-    final db = await database;
-    await db.delete('screenshots', where: 'is_mock = 1 OR file_path LIKE ?', whereArgs: ['%assets/mock_screenshots%']);
   }
 
   Future<void> clearAiCache() async {
