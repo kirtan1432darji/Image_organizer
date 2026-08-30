@@ -16,11 +16,10 @@ public class ScanScreenshotCommandValidator : AbstractValidator<ScanScreenshotCo
 {
     public ScanScreenshotCommandValidator()
     {
-        RuleFor(v => v.Request.ImageId).NotEmpty().WithMessage("ImageId is required.");
-        RuleFor(v => v.Request.ImagePath).NotEmpty().WithMessage("ImagePath is required.");
-        RuleFor(v => v.Request.CapturedDate).NotEmpty().WithMessage("CapturedDate is required.");
-        RuleFor(v => v.Request.Width).GreaterThanOrEqualTo(0).WithMessage("Width must be non-negative.");
-        RuleFor(v => v.Request.Height).GreaterThanOrEqualTo(0).WithMessage("Height must be non-negative.");
+        RuleFor(v => v.Request).NotNull().WithMessage("Request is required.");
+        RuleFor(v => v.Request)
+            .Must(r => !string.IsNullOrEmpty(r.DeviceAssetId) || !string.IsNullOrEmpty(r.ImageId))
+            .WithMessage("Either device_asset_id or image_id must be provided.");
     }
 }
 
@@ -45,63 +44,94 @@ public class ScanScreenshotCommandHandler : IRequestHandler<ScanScreenshotComman
 
     public async Task<ScreenshotDto> Handle(ScanScreenshotCommand request, CancellationToken cancellationToken)
     {
-        var userId = _currentUserService.UserId ?? throw new UnauthorizedException();
+        var userId = _currentUserService.UserId ?? throw new UnauthorizedException("Authenticated user is required to scan screenshots.");
         var req = request.Request;
 
-        var existing = await _unitOfWork.Screenshots.GetByImageIdAsync(req.ImageId, userId, cancellationToken);
-        if (existing != null)
-        {
-            return _mapper.Map<ScreenshotDto>(existing);
-        }
+        var assetId = !string.IsNullOrEmpty(req.DeviceAssetId) ? req.DeviceAssetId : req.ImageId!;
+        var imagePath = req.ImagePath ?? req.FilePath ?? string.Empty;
+        var fileName = !string.IsNullOrEmpty(req.FileName) ? req.FileName : System.IO.Path.GetFileName(imagePath);
+        var capturedDate = req.CapturedDate ?? req.CreatedAt ?? DateTime.UtcNow;
 
         var hash = !string.IsNullOrEmpty(req.Hash) 
             ? req.Hash 
-            : HashHelper.ComputeSha256Hash($"{req.ImageId}_{req.Width}_{req.Height}_{req.CapturedDate:O}");
+            : HashHelper.ComputeSha256Hash($"{assetId}_{req.Width}_{req.Height}_{capturedDate:O}");
 
-        var screenshot = new Screenshot
+        var existing = await _unitOfWork.Screenshots.GetByDeviceAssetIdAsync(assetId, userId, cancellationToken);
+        var isNew = existing == null;
+
+        var screenshot = existing ?? new Screenshot
         {
             Id = Guid.NewGuid(),
             UserId = userId,
-            ImageId = req.ImageId,
-            ImagePath = req.ImagePath,
-            ThumbnailPath = req.ThumbnailPath,
-            CapturedDate = req.CapturedDate,
-            SourceApp = req.SourceApp ?? string.Empty,
-            Width = req.Width,
-            Height = req.Height,
-            OCRText = req.OCRText ?? string.Empty,
-            VisionDescription = req.VisionDescription,
-            Hash = hash,
+            DeviceAssetId = assetId,
+            ImageId = assetId,
             CreatedDate = DateTime.UtcNow
         };
 
-        // Cache OCR
-        if (!string.IsNullOrWhiteSpace(req.OCRText))
+        screenshot.ImagePath = imagePath;
+        screenshot.ThumbnailPath = req.ThumbnailPath ?? screenshot.ThumbnailPath;
+        screenshot.FileName = fileName;
+        screenshot.FileSize = req.FileSize > 0 ? req.FileSize : screenshot.FileSize;
+        screenshot.ContentUri = req.ContentUri ?? screenshot.ContentUri;
+        screenshot.CapturedDate = capturedDate;
+        screenshot.SourceApp = req.SourceApp ?? screenshot.SourceApp ?? string.Empty;
+        screenshot.Width = req.Width > 0 ? req.Width : screenshot.Width;
+        screenshot.Height = req.Height > 0 ? req.Height : screenshot.Height;
+        screenshot.OCRText = req.OCRText ?? screenshot.OCRText ?? string.Empty;
+        screenshot.VisionDescription = req.VisionDescription ?? screenshot.VisionDescription;
+        screenshot.Hash = hash;
+        screenshot.LastScannedAt = DateTime.UtcNow;
+        screenshot.UpdatedDate = DateTime.UtcNow;
+        screenshot.IsMock = req.IsMock ?? false;
+
+        if (req.IsFavorite.HasValue)
         {
-            screenshot.OCRCache = new OCRCache
-            {
-                Id = Guid.NewGuid(),
-                ScreenshotId = screenshot.Id,
-                OCRText = req.OCRText,
-                Language = "en",
-                Confidence = 0.95,
-                CreatedDate = DateTime.UtcNow
-            };
+            screenshot.IsFavorite = req.IsFavorite.Value;
         }
 
-        // AI Classification if enabled
-        if (req.AutoClassify ?? true)
+        if (req.IsReviewed.HasValue)
+        {
+            screenshot.IsReviewed = req.IsReviewed.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(req.OCRText))
+        {
+            screenshot.OCRStatus = "completed";
+            if (screenshot.OCRCache == null)
+            {
+                screenshot.OCRCache = new OCRCache
+                {
+                    Id = Guid.NewGuid(),
+                    ScreenshotId = screenshot.Id,
+                    OCRText = req.OCRText,
+                    Language = "en",
+                    Confidence = 0.95,
+                    CreatedDate = DateTime.UtcNow
+                };
+            }
+            else
+            {
+                screenshot.OCRCache.OCRText = req.OCRText;
+                screenshot.OCRCache.UpdatedDate = DateTime.UtcNow;
+            }
+        }
+
+        // Auto classification if requested
+        if ((req.AutoClassify ?? true) && (isNew || string.IsNullOrEmpty(screenshot.OCRText) || screenshot.CategoryId == null))
         {
             var classification = await _aiClassificationService.ClassifyScreenshotAsync(new ClassifyScreenshotRequestDto
             {
-                OCRText = req.OCRText ?? string.Empty,
-                VisionDescription = req.VisionDescription,
-                SourceApp = req.SourceApp ?? string.Empty
+                ScreenshotId = screenshot.Id.ToString(),
+                FileName = fileName,
+                OCRText = screenshot.OCRText,
+                VisionDescription = screenshot.VisionDescription,
+                SourceApp = screenshot.SourceApp
             }, cancellationToken);
 
             screenshot.Confidence = classification.Confidence;
+            screenshot.IsReviewed = classification.Confidence >= 0.85;
 
-            // Resolve or Create Category
+            // Resolve or create Category
             if (!string.IsNullOrEmpty(classification.Category))
             {
                 var category = await _unitOfWork.Categories.GetByNameAsync(classification.Category, userId, cancellationToken);
@@ -118,13 +148,17 @@ public class ScanScreenshotCommandHandler : IRequestHandler<ScanScreenshotComman
                     await _unitOfWork.Categories.AddAsync(category, cancellationToken);
                 }
                 screenshot.CategoryId = category.Id;
-                screenshot.ScreenshotCategories.Add(new ScreenshotCategory
-                {
-                    ScreenshotId = screenshot.Id,
-                    CategoryId = category.Id
-                });
 
-                // Resolve SubCategory if present
+                if (!screenshot.ScreenshotCategories.Any(sc => sc.CategoryId == category.Id))
+                {
+                    screenshot.ScreenshotCategories.Add(new ScreenshotCategory
+                    {
+                        ScreenshotId = screenshot.Id,
+                        CategoryId = category.Id
+                    });
+                }
+
+                // Resolve subcategory
                 if (!string.IsNullOrEmpty(classification.SubCategory))
                 {
                     var subCat = await _unitOfWork.Categories.GetByNameAsync(classification.SubCategory, userId, cancellationToken);
@@ -145,21 +179,23 @@ public class ScanScreenshotCommandHandler : IRequestHandler<ScanScreenshotComman
                 }
             }
 
-            // Resolve Tags
+            // Resolve tags
             if (classification.Tags.Any())
             {
                 var tags = await _unitOfWork.Tags.GetOrCreateTagsAsync(classification.Tags, userId, cancellationToken);
                 foreach (var tag in tags)
                 {
-                    screenshot.ScreenshotTags.Add(new ScreenshotTag
+                    if (!screenshot.ScreenshotTags.Any(st => st.TagId == tag.Id))
                     {
-                        ScreenshotId = screenshot.Id,
-                        TagId = tag.Id
-                    });
+                        screenshot.ScreenshotTags.Add(new ScreenshotTag
+                        {
+                            ScreenshotId = screenshot.Id,
+                            TagId = tag.Id
+                        });
+                    }
                 }
             }
 
-            // Save Classification History
             screenshot.ClassificationHistories.Add(new ClassificationHistory
             {
                 Id = Guid.NewGuid(),
@@ -173,7 +209,15 @@ public class ScanScreenshotCommandHandler : IRequestHandler<ScanScreenshotComman
             });
         }
 
-        await _unitOfWork.Screenshots.AddAsync(screenshot, cancellationToken);
+        if (isNew)
+        {
+            await _unitOfWork.Screenshots.AddAsync(screenshot, cancellationToken);
+        }
+        else
+        {
+            _unitOfWork.Screenshots.Update(screenshot);
+        }
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var result = await _unitOfWork.Screenshots.GetWithDetailsByIdAsync(screenshot.Id, userId, cancellationToken);

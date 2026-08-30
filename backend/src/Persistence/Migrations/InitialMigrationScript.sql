@@ -172,6 +172,41 @@ CREATE UNIQUE INDEX [IX_Users_Email] ON [Users] ([Email]);
 INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
 VALUES (N'20260830190845_InitialCreate', N'9.0.0');
 
+DROP INDEX [IX_Screenshots_UserId_ImageId] ON [Screenshots];
+DECLARE @var0 sysname;
+SELECT @var0 = [d].[name]
+FROM [sys].[default_constraints] [d]
+INNER JOIN [sys].[columns] [c] ON [d].[parent_column_id] = [c].[column_id] AND [d].[parent_object_id] = [c].[object_id]
+WHERE ([d].[parent_object_id] = OBJECT_ID(N'[Screenshots]') AND [c].[name] = N'ImageId');
+IF @var0 IS NOT NULL EXEC(N'ALTER TABLE [Screenshots] DROP CONSTRAINT [' + @var0 + '];');
+ALTER TABLE [Screenshots] ALTER COLUMN [ImageId] nvarchar(256) NOT NULL;
+CREATE INDEX [IX_Screenshots_UserId_ImageId] ON [Screenshots] ([UserId], [ImageId]);
+
+ALTER TABLE [Screenshots] ADD [ContentUri] nvarchar(1024) NULL;
+
+ALTER TABLE [Screenshots] ADD [DeviceAssetId] nvarchar(256) NOT NULL DEFAULT N'';
+
+ALTER TABLE [Screenshots] ADD [FileName] nvarchar(256) NOT NULL DEFAULT N'';
+
+ALTER TABLE [Screenshots] ADD [FileSize] bigint NOT NULL DEFAULT CAST(0 AS bigint);
+
+ALTER TABLE [Screenshots] ADD [IsMock] bit NOT NULL DEFAULT CAST(0 AS bit);
+
+ALTER TABLE [Screenshots] ADD [IsReviewed] bit NOT NULL DEFAULT CAST(0 AS bit);
+
+ALTER TABLE [Screenshots] ADD [IsSynced] bit NOT NULL DEFAULT CAST(0 AS bit);
+
+ALTER TABLE [Screenshots] ADD [LastScannedAt] datetime2 NULL;
+
+ALTER TABLE [Screenshots] ADD [OCRStatus] nvarchar(30) NOT NULL DEFAULT N'';
+
+CREATE INDEX [IX_Screenshots_IsReviewed] ON [Screenshots] ([IsReviewed]);
+
+CREATE UNIQUE INDEX [IX_Screenshots_UserId_DeviceAssetId] ON [Screenshots] ([UserId], [DeviceAssetId]) WHERE [DeviceAssetId] IS NOT NULL AND [DeviceAssetId] <> '';
+
+INSERT INTO [__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+VALUES (N'20260830203324_AddDeviceAssetIdAndMetadata', N'9.0.0');
+
 COMMIT;
 GO
 

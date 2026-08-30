@@ -10,6 +10,11 @@ using AI.ScreenshotOrganizer.Persistence.Context;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load optional local overrides and environment variables
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
+    .AddEnvironmentVariables();
+
 // Configure Serilog
 builder.Host.UseSerilog((context, services, configuration) => configuration
     .ReadFrom.Configuration(context.Configuration)
@@ -32,8 +37,8 @@ builder.Services.AddRateLimiter(options =>
             factory: partition => new FixedWindowRateLimiterOptions
             {
                 AutoReplenishment = true,
-                PermitLimit = 100,
-                QueueLimit = 10,
+                PermitLimit = 200,
+                QueueLimit = 20,
                 Window = TimeSpan.FromMinutes(1)
             }));
 });

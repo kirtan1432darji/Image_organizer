@@ -1,10 +1,13 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using AI.ScreenshotOrganizer.Application.Common.Models;
+using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.BatchClassify;
+using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.BatchScan;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.ClassifyScreenshot;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.DeleteScreenshot;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.ScanScreenshot;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.ToggleFavorite;
+using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.ToggleReview;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Commands.UpdateScreenshot;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.DTOs;
 using AI.ScreenshotOrganizer.Application.Features.Screenshots.Queries.GetScreenshotById;
@@ -22,7 +25,16 @@ public class ScreenshotsController : ApiControllerBase
     public async Task<IActionResult> Scan([FromBody] ScanScreenshotRequestDto request)
     {
         var result = await Mediator.Send(new ScanScreenshotCommand(request));
-        return Ok(ApiResponse<ScreenshotDto>.SuccessResponse(result, "Screenshot scanned and indexed successfully."));
+        return Ok(ApiResponse<ScreenshotDto>.SuccessResponse(result, "Screenshot scanned and upserted successfully."));
+    }
+
+    [HttpPost("batch")]
+    [ProducesResponseType(typeof(ApiResponse<BatchScanResponseDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> BatchScan([FromBody] BatchScanScreenshotRequestDto request)
+    {
+        var result = await Mediator.Send(new BatchScanScreenshotsCommand(request.Screenshots));
+        return Ok(ApiResponse<BatchScanResponseDto>.SuccessResponse(result, $"Processed {result.ProcessedCount} screenshots."));
     }
 
     [HttpPost("classify")]
@@ -32,6 +44,15 @@ public class ScreenshotsController : ApiControllerBase
     {
         var result = await Mediator.Send(new ClassifyScreenshotCommand(request));
         return Ok(ApiResponse<ClassificationResultDto>.SuccessResponse(result, "Screenshot classified successfully."));
+    }
+
+    [HttpPost("batch-classify")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(ApiResponse<BatchClassifyResponseDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> BatchClassify([FromBody] BatchClassifyRequestDto request)
+    {
+        var result = await Mediator.Send(new BatchClassifyScreenshotsCommand(request.Items));
+        return Ok(ApiResponse<BatchClassifyResponseDto>.SuccessResponse(result, $"Batch classified {result.Results.Count} items."));
     }
 
     [HttpGet]
@@ -67,6 +88,15 @@ public class ScreenshotsController : ApiControllerBase
     {
         var result = await Mediator.Send(new ToggleFavoriteCommand(id, isFavorite));
         return Ok(ApiResponse<bool>.SuccessResponse(result, $"Favorite status updated to: {result}"));
+    }
+
+    [HttpPatch("{id:guid}/review")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> MarkReviewed([FromRoute] Guid id, [FromQuery] bool? isReviewed = true)
+    {
+        var result = await Mediator.Send(new ToggleReviewStatusCommand(id, isReviewed));
+        return Ok(ApiResponse<bool>.SuccessResponse(result, $"Review status updated to: {result}"));
     }
 
     [HttpDelete("{id:guid}")]

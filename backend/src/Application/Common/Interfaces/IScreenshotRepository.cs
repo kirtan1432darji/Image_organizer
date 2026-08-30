@@ -8,6 +8,9 @@ public interface IScreenshotRepository : IGenericRepository<Screenshot>
 {
     Task<Screenshot?> GetWithDetailsByIdAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
     Task<Screenshot?> GetByImageIdAsync(string imageId, Guid userId, CancellationToken cancellationToken = default);
+    Task<Screenshot?> GetByDeviceAssetIdAsync(string deviceAssetId, Guid userId, CancellationToken cancellationToken = default);
+    Task<Screenshot> UpsertAsync(Screenshot screenshot, CancellationToken cancellationToken = default);
+    Task<List<Screenshot>> BatchUpsertAsync(IEnumerable<Screenshot> screenshots, Guid userId, CancellationToken cancellationToken = default);
     Task<PagedResult<Screenshot>> GetPagedListAsync(Guid userId, ScreenshotFilterDto filter, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Screenshot>> SearchAsync(Guid userId, string keyword, Guid? categoryId, string? sourceApp, int limit = 50, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<Screenshot>> GetChangesSinceAsync(Guid userId, DateTime since, CancellationToken cancellationToken = default);
