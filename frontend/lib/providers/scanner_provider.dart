@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../core/services/screenshot_scanner_service.dart';
 import '../models/screenshot_model.dart';
+import 'category_provider.dart';
 import 'screenshot_provider.dart';
 
 final scannerServiceProvider = Provider<ScreenshotScannerService>((ref) {
@@ -105,8 +106,9 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
         isLimitedPermission: isLimited,
       );
 
-      // Refresh screenshot list
+      // Refresh screenshot list and category counters
       await _ref.read(screenshotListProvider.notifier).refresh();
+      await _ref.read(categoryListProvider.notifier).syncRemote();
     } else {
       state = state.copyWith(
         isScanning: false,

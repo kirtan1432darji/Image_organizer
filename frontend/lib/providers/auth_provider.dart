@@ -3,6 +3,7 @@ import '../core/services/api_client.dart';
 import '../core/services/auth_service.dart';
 import '../models/auth_model.dart';
 import 'settings_provider.dart';
+import 'category_provider.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService();
@@ -46,10 +47,11 @@ class AuthState {
 }
 
 class AuthNotifier extends StateNotifier<AuthState> {
+  final Ref _ref;
   final AuthService _authService;
   final ApiClient _apiClient;
 
-  AuthNotifier(this._authService, this._apiClient)
+  AuthNotifier(this._ref, this._authService, this._apiClient)
       : super(AuthState(
           isAuthenticated: _authService.isAuthenticated,
           user: _authService.currentUser,
@@ -69,6 +71,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         user: auth.user,
       );
+      // Sync categories with authenticated user
+      await _ref.read(categoryListProvider.notifier).syncRemote();
       return true;
     } else {
       state = state.copyWith(
@@ -94,6 +98,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         isLoading: false,
         user: auth.user,
       );
+      // Sync categories with authenticated user
+      await _ref.read(categoryListProvider.notifier).syncRemote();
       return true;
     } else {
       state = state.copyWith(
@@ -118,5 +124,5 @@ class AuthNotifier extends StateNotifier<AuthState> {
 final authProvider = StateNotifierProvider<AuthNotifier, AuthState>((ref) {
   final authService = ref.watch(authServiceProvider);
   final apiClient = ref.watch(apiClientProvider);
-  return AuthNotifier(authService, apiClient);
+  return AuthNotifier(ref, authService, apiClient);
 });

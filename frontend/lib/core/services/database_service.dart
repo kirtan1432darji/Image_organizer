@@ -6,7 +6,6 @@ import '../../models/category_model.dart';
 import '../../models/screenshot_model.dart';
 import '../../models/sync_queue_item_model.dart';
 import '../../models/tag_model.dart';
-import '../../mock/mock_data.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -131,15 +130,8 @@ class DatabaseService {
       )
     ''');
 
-    // Seed default categories
-    final batch = db.batch();
-    for (final category in MockData.initialCategories) {
-      batch.insert('categories', category.toMap());
-    }
-    for (final tag in MockData.initialTags) {
-      batch.insert('tags', tag.toMap());
-    }
-    await batch.commit(noResult: true);
+    // Seed default canonical Unsorted category
+    await db.insert('categories', CategoryModel.unsortedCategory.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -373,20 +365,162 @@ class DatabaseService {
 
   Future<List<CategoryModel>> getCategories() async {
     final db = await database;
-    final maps = await db.query('categories', orderBy: 'order_index ASC');
+
+    // 1. Single grouped query for exact ID counts
+    final idCountResults = await db.rawQuery('''
+      SELECT category_id, COUNT(*) as count 
+      FROM screenshots 
+      WHERE is_mock = 0 
+      GROUP BY category_id
+    ''');
+    final idCounts = <String, int>{};
+    for (final row in idCountResults) {
+      final catId = row['category_id'] as String?;
+      final count = row['count'] as int? ?? 0;
+      if (catId != null && catId.isNotEmpty) {
+        idCounts[catId.toLowerCase()] = count;
+      }
+    }
+
+    // 2. Fallback grouped query for category name counts
+    final nameCountResults = await db.rawQuery('''
+      SELECT LOWER(category_name) as lower_name, COUNT(*) as count 
+      FROM screenshots 
+      WHERE is_mock = 0 AND category_name IS NOT NULL
+      GROUP BY LOWER(category_name)
+    ''');
+    final nameCounts = <String, int>{};
+    for (final row in nameCountResults) {
+      final name = row['lower_name'] as String?;
+      final count = row['count'] as int? ?? 0;
+      if (name != null && name.isNotEmpty) {
+        nameCounts[name] = count;
+      }
+    }
+
+    // 3. Query all categories from SQLite
+    final maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
     final categories = <CategoryModel>[];
+    bool hasUnsorted = false;
 
     for (final map in maps) {
-      final id = map['id'] as String;
-      final countResult = await db.rawQuery(
-        'SELECT COUNT(*) as count FROM screenshots WHERE category_id = ?',
-        [id],
-      );
-      final count = Sqflite.firstIntValue(countResult) ?? 0;
+      final id = (map['id'] as String).toLowerCase();
+      final name = (map['name'] as String? ?? '').toLowerCase();
+      if (id == CategoryModel.unsortedId || name == CategoryModel.unsortedName.toLowerCase()) {
+        hasUnsorted = true;
+      }
+
+      int count = idCounts[id] ?? 0;
+      if (count == 0 && nameCounts.containsKey(name)) {
+        count = nameCounts[name] ?? 0;
+      }
+
       categories.add(CategoryModel.fromMap(map, count));
     }
 
+    // 4. Ensure Unsorted category is always included
+    if (!hasUnsorted) {
+      int unsortedCount = idCounts[CategoryModel.unsortedId] ?? 0;
+      if (unsortedCount == 0 && nameCounts.containsKey(CategoryModel.unsortedName.toLowerCase())) {
+        unsortedCount = nameCounts[CategoryModel.unsortedName.toLowerCase()] ?? 0;
+      }
+      categories.add(CategoryModel.unsortedCategory.copyWith(screenshotCount: unsortedCount));
+    }
+
     return categories;
+  }
+
+  Future<void> upsertCategory(CategoryModel category) async {
+    final db = await database;
+
+    // Check if an old category exists with the same name but different id (e.g. old string ID)
+    final existingWithSameName = await db.query(
+      'categories',
+      where: 'LOWER(name) = LOWER(?) AND id != ?',
+      whereArgs: [category.name, category.id],
+    );
+
+    if (existingWithSameName.isNotEmpty) {
+      for (final oldRow in existingWithSameName) {
+        final oldId = oldRow['id'] as String;
+        // Re-link screenshots that had old ID to new canonical ID
+        await db.update(
+          'screenshots',
+          {'category_id': category.id, 'category_name': category.name},
+          where: 'category_id = ?',
+          whereArgs: [oldId],
+        );
+        // Delete old row
+        await db.delete(
+          'categories',
+          where: 'id = ?',
+          whereArgs: [oldId],
+        );
+      }
+    }
+
+    await db.insert(
+      'categories',
+      category.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> upsertCategories(List<CategoryModel> categories) async {
+    for (final cat in categories) {
+      await upsertCategory(cat);
+    }
+  }
+
+  Future<void> migrateCategoryIdsAndRepairData(List<CategoryModel> canonicalCategories) async {
+    final db = await database;
+
+    // 1. Purge legacy mock screenshot records
+    await db.delete(
+      'screenshots',
+      where: "file_path LIKE 'assets/mock_screenshots%' OR is_mock = 1",
+    );
+
+    // 2. Map old mock category IDs to backend category names
+    final oldMockMap = {
+      'receipts': 'Receipts & Invoices',
+      'social': 'Social & Chat',
+      'social & chats': 'Social & Chat',
+      'finance': 'Finance & Banking',
+      'documents': 'Documents & IDs',
+      'work': 'Documents & IDs',
+      'code': 'Code & Tech',
+      'memes': 'Memes & Humor',
+      'notes': 'Notes & Knowledge',
+      'shopping': 'Shopping & Wishlist',
+      'travel': 'Travel & Tickets',
+    };
+
+    // 3. For each canonical category, update screenshots that have matching name or old mock ID
+    for (final cat in canonicalCategories) {
+      final matchingOldIds = <String>[cat.id];
+      for (final entry in oldMockMap.entries) {
+        if (entry.value.toLowerCase() == cat.name.toLowerCase()) {
+          matchingOldIds.add(entry.key);
+        }
+      }
+
+      for (final oldId in matchingOldIds) {
+        await db.update(
+          'screenshots',
+          {'category_id': cat.id, 'category_name': cat.name},
+          where: '(category_id = ? OR LOWER(category_name) = LOWER(?)) AND category_id != ? AND is_mock = 0',
+          whereArgs: [oldId, cat.name, cat.id],
+        );
+      }
+    }
+
+    // 4. Normalize any screenshots with null, empty, or 'unsorted' category
+    await db.update(
+      'screenshots',
+      {'category_id': CategoryModel.unsortedId, 'category_name': CategoryModel.unsortedName},
+      where: '(category_id IS NULL OR category_id = \'\' OR category_id = \'unsorted\') AND is_mock = 0',
+    );
   }
 
   // ==================== TAGS ====================

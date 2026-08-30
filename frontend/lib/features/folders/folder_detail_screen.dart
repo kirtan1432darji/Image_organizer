@@ -48,7 +48,8 @@ class _FolderDetailScreenState extends ConsumerState<FolderDetailScreen> {
           // Filter by current category
           final categoryItems = allScreenshots.where((s) {
             if (widget.categoryId == 'all') return true;
-            return s.categoryId.toLowerCase() == widget.categoryId.toLowerCase();
+            return s.categoryId.toLowerCase() == widget.categoryId.toLowerCase() ||
+                   (widget.categoryName.isNotEmpty && s.categoryName.toLowerCase() == widget.categoryName.toLowerCase());
           }).toList();
 
           if (categoryItems.isEmpty) {

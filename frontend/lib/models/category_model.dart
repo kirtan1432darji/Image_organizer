@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 
 class CategoryModel {
+  static const String unsortedId = 'unsorted';
+  static const String unsortedName = 'Unsorted';
+
+  static const CategoryModel unsortedCategory = CategoryModel(
+    id: unsortedId,
+    name: unsortedName,
+    iconName: 'help_outline',
+    colorHex: '94A3B8',
+    description: 'Screenshots awaiting AI classification',
+    isSystem: true,
+    orderIndex: 999,
+  );
+
   final String id;
   final String name;
   final String iconName;
@@ -31,36 +44,41 @@ class CategoryModel {
   }
 
   IconData get icon {
-    switch (iconName.toLowerCase()) {
-      case 'receipt':
-      case 'finance':
-      case 'account_balance_wallet':
-        return Icons.account_balance_wallet_outlined;
-      case 'social':
-      case 'chat':
-      case 'forum':
-        return Icons.chat_bubble_outline;
-      case 'code':
-      case 'developer_mode':
-        return Icons.code_rounded;
-      case 'work':
-      case 'business_center':
-        return Icons.business_center_outlined;
-      case 'shopping':
-      case 'shopping_cart':
-        return Icons.shopping_bag_outlined;
-      case 'travel':
-      case 'flight':
-        return Icons.flight_takeoff_outlined;
-      case 'meme':
-      case 'sentiment_satisfied':
-        return Icons.sentiment_satisfied_alt_outlined;
-      case 'notes':
-      case 'description':
-        return Icons.description_outlined;
-      default:
-        return Icons.folder_outlined;
+    final lowerIcon = iconName.toLowerCase();
+    final lowerName = name.toLowerCase();
+
+    if (lowerIcon.contains('receipt') || lowerName.contains('receipt') || lowerName.contains('invoice')) {
+      return Icons.receipt_long_rounded;
     }
+    if (lowerIcon.contains('account_balance') || lowerIcon.contains('finance') || lowerName.contains('finance') || lowerName.contains('banking')) {
+      return Icons.account_balance_wallet_outlined;
+    }
+    if (lowerIcon.contains('forum') || lowerIcon.contains('chat') || lowerIcon.contains('social') || lowerName.contains('social') || lowerName.contains('chat')) {
+      return Icons.chat_bubble_outline_rounded;
+    }
+    if (lowerIcon.contains('code') || lowerName.contains('code') || lowerName.contains('tech') || lowerName.contains('dev')) {
+      return Icons.code_rounded;
+    }
+    if (lowerIcon.contains('description') || lowerIcon.contains('document') || lowerName.contains('document') || lowerName.contains('id')) {
+      return Icons.description_outlined;
+    }
+    if (lowerIcon.contains('sentiment') || lowerIcon.contains('meme') || lowerName.contains('meme') || lowerName.contains('humor')) {
+      return Icons.sentiment_satisfied_alt_rounded;
+    }
+    if (lowerIcon.contains('note') || lowerName.contains('note') || lowerName.contains('knowledge')) {
+      return Icons.edit_note_rounded;
+    }
+    if (lowerIcon.contains('shopping') || lowerName.contains('shopping') || lowerName.contains('wishlist')) {
+      return Icons.shopping_bag_outlined;
+    }
+    if (lowerIcon.contains('flight') || lowerIcon.contains('travel') || lowerName.contains('travel') || lowerName.contains('ticket')) {
+      return Icons.flight_takeoff_rounded;
+    }
+    if (lowerIcon.contains('help') || lowerName.contains('unsorted')) {
+      return Icons.help_outline_rounded;
+    }
+
+    return Icons.folder_outlined;
   }
 
   CategoryModel copyWith({
@@ -98,14 +116,24 @@ class CategoryModel {
   }
 
   factory CategoryModel.fromMap(Map<String, dynamic> map, [int count = 0]) {
+    final rawId = map['id']?.toString() ?? '';
+    final rawName = map['name'] as String? ?? '';
+    final rawIcon = map['icon_name'] as String? ?? map['icon'] as String? ?? 'folder';
+    final rawColor = map['color_hex'] as String? ?? map['color'] as String? ?? '6366F1';
+    final rawDesc = map['description'] as String? ?? '';
+    final rawOrder = map['order_index'] as int? ?? map['displayOrder'] as int? ?? 0;
+    final isSys = map['is_system'] != null 
+        ? (map['is_system'] as int? ?? 1) == 1
+        : !(map['createdByAI'] as bool? ?? false);
+
     return CategoryModel(
-      id: map['id'] as String,
-      name: map['name'] as String,
-      iconName: map['icon_name'] as String? ?? 'folder',
-      colorHex: map['color_hex'] as String? ?? '6366F1',
-      description: map['description'] as String? ?? '',
-      isSystem: (map['is_system'] as int? ?? 1) == 1,
-      orderIndex: map['order_index'] as int? ?? 0,
+      id: rawId,
+      name: rawName,
+      iconName: rawIcon,
+      colorHex: rawColor,
+      description: rawDesc,
+      isSystem: isSys,
+      orderIndex: rawOrder,
       screenshotCount: count,
     );
   }

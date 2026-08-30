@@ -4,6 +4,7 @@ import '../core/services/database_service.dart';
 import '../core/services/api_client.dart';
 import '../core/services/ocr_service.dart';
 import '../core/utils/result.dart';
+import '../models/category_model.dart';
 import '../models/screenshot_model.dart';
 import '../models/tag_model.dart';
 import '../models/sync_queue_item_model.dart';
@@ -260,8 +261,15 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
 
     if (aiResult.isSuccess) {
       final cl = aiResult.dataOrNull!;
-      detectedCategory = cl.categoryId.isNotEmpty ? cl.categoryId : cl.categoryName.toLowerCase();
-      detectedCategoryName = cl.categoryName;
+      final currentCategories = await _db.getCategories();
+      final matchedCategory = currentCategories.firstWhere(
+        (c) => c.name.toLowerCase() == cl.categoryName.toLowerCase() ||
+               c.id.toLowerCase() == cl.categoryId.toLowerCase(),
+        orElse: () => CategoryModel.unsortedCategory,
+      );
+
+      detectedCategory = matchedCategory.id;
+      detectedCategoryName = matchedCategory.name;
       subcategory = cl.subcategory;
       confidence = cl.confidence;
 
@@ -328,8 +336,8 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
       width: dto['width'] as int? ?? 1080,
       height: dto['height'] as int? ?? 2400,
       fileSize: dto['fileSize'] as int? ?? 0,
-      categoryId: catMap?['id']?.toString() ?? dto['categoryId']?.toString() ?? 'unsorted',
-      categoryName: catMap?['name']?.toString() ?? dto['categoryName']?.toString() ?? 'Unsorted',
+      categoryId: catMap?['id']?.toString() ?? dto['categoryId']?.toString() ?? CategoryModel.unsortedId,
+      categoryName: catMap?['name']?.toString() ?? dto['categoryName']?.toString() ?? CategoryModel.unsortedName,
       subcategory: dto['subCategory']?['name']?.toString() ?? dto['subcategory']?.toString() ?? '',
       confidence: (dto['confidence'] as num?)?.toDouble() ?? 0.0,
       sourceApp: dto['sourceApp']?.toString(),

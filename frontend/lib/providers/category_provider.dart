@@ -2,15 +2,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/category_model.dart';
 import '../models/tag_model.dart';
 import '../repositories/category_repository.dart';
+import 'auth_provider.dart';
 
 final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
-  return CategoryRepositoryImpl();
+  final apiClient = ref.watch(apiClientProvider);
+  return CategoryRepositoryImpl(apiClient: apiClient);
 });
 
 class CategoryNotifier extends AsyncNotifier<List<CategoryModel>> {
   @override
   Future<List<CategoryModel>> build() async {
-    return _fetchCategories();
+    // 1. Return cached categories from SQLite immediately
+    final repo = ref.read(categoryRepositoryProvider);
+    final initialList = await repo.getCategories();
+
+    // 2. Trigger remote category sync in background
+    Future.microtask(() => syncRemote());
+
+    return initialList;
   }
 
   Future<List<CategoryModel>> _fetchCategories() async {
@@ -19,14 +28,13 @@ class CategoryNotifier extends AsyncNotifier<List<CategoryModel>> {
   }
 
   Future<void> refresh() async {
-    state = const AsyncValue.loading();
     state = await AsyncValue.guard(() => _fetchCategories());
   }
 
   Future<void> syncRemote() async {
     final repo = ref.read(categoryRepositoryProvider);
     await repo.syncRemoteCategories();
-    await refresh();
+    state = await AsyncValue.guard(() => _fetchCategories());
   }
 }
 
