@@ -555,13 +555,13 @@ class DatabaseService {
 
   Future<Map<String, int>> getStats() async {
     final db = await database;
-    final totalResult = await db.rawQuery('SELECT COUNT(*) FROM screenshots');
+    final totalResult = await db.rawQuery('SELECT COUNT(*) FROM screenshots WHERE is_mock = 0');
     final favoritesResult =
-        await db.rawQuery('SELECT COUNT(*) FROM screenshots WHERE is_favorite = 1');
+        await db.rawQuery('SELECT COUNT(*) FROM screenshots WHERE is_favorite = 1 AND is_mock = 0');
     final needsReviewResult = await db.rawQuery(
-        'SELECT COUNT(*) FROM screenshots WHERE is_reviewed = 0 AND (confidence < 0.70 OR category_id = "unsorted")');
+        'SELECT COUNT(*) FROM screenshots WHERE is_reviewed = 0 AND (confidence < 0.70 OR category_id = "unsorted") AND is_mock = 0');
     final syncedResult =
-        await db.rawQuery('SELECT COUNT(*) FROM screenshots WHERE is_synced = 1');
+        await db.rawQuery('SELECT COUNT(*) FROM screenshots WHERE is_synced = 1 AND is_mock = 0');
 
     return {
       'total': Sqflite.firstIntValue(totalResult) ?? 0,

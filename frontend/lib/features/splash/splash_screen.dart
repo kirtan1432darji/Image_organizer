@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -17,6 +18,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
   late Animation<double> _fadeAnimation;
+  Timer? _navTimer;
 
   @override
   void initState() {
@@ -35,11 +37,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     );
 
     _controller.forward();
-    _navigateToNext();
+    _navTimer = Timer(const Duration(milliseconds: 1800), _navigateToNext);
   }
 
-  Future<void> _navigateToNext() async {
-    await Future.delayed(const Duration(milliseconds: 1800));
+  void _navigateToNext() {
     if (!mounted) return;
 
     final settings = ref.read(settingsProvider);
@@ -52,6 +53,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
 
   @override
   void dispose() {
+    _navTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }

@@ -12,14 +12,8 @@ final categoryRepositoryProvider = Provider<CategoryRepository>((ref) {
 class CategoryNotifier extends AsyncNotifier<List<CategoryModel>> {
   @override
   Future<List<CategoryModel>> build() async {
-    // 1. Return cached categories from SQLite immediately
     final repo = ref.read(categoryRepositoryProvider);
-    final initialList = await repo.getCategories();
-
-    // 2. Trigger remote category sync in background
-    Future.microtask(() => syncRemote());
-
-    return initialList;
+    return repo.getCategories();
   }
 
   Future<List<CategoryModel>> _fetchCategories() async {

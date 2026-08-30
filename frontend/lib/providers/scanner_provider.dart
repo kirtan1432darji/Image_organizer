@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../core/services/screenshot_scanner_service.dart';
@@ -16,6 +17,9 @@ class ScannerState {
   final String statusMessage;
   final List<ScreenshotModel> newlyFound;
   final bool isLimitedPermission;
+  final bool isPermissionDenied;
+  final int indexedCount;
+  final DateTime? lastScanTime;
 
   const ScannerState({
     this.isScanning = false,
@@ -24,6 +28,9 @@ class ScannerState {
     this.statusMessage = 'Idle',
     this.newlyFound = const [],
     this.isLimitedPermission = false,
+    this.isPermissionDenied = false,
+    this.indexedCount = 0,
+    this.lastScanTime,
   });
 
   ScannerState copyWith({
@@ -33,6 +40,9 @@ class ScannerState {
     String? statusMessage,
     List<ScreenshotModel>? newlyFound,
     bool? isLimitedPermission,
+    bool? isPermissionDenied,
+    int? indexedCount,
+    DateTime? lastScanTime,
   }) {
     return ScannerState(
       isScanning: isScanning ?? this.isScanning,
@@ -41,6 +51,9 @@ class ScannerState {
       statusMessage: statusMessage ?? this.statusMessage,
       newlyFound: newlyFound ?? this.newlyFound,
       isLimitedPermission: isLimitedPermission ?? this.isLimitedPermission,
+      isPermissionDenied: isPermissionDenied ?? this.isPermissionDenied,
+      indexedCount: indexedCount ?? this.indexedCount,
+      lastScanTime: lastScanTime ?? this.lastScanTime,
     );
   }
 }
@@ -50,13 +63,18 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
   final ScreenshotScannerService _scanner;
 
   ScannerNotifier(this._ref, this._scanner) : super(const ScannerState()) {
-    _checkPermissionState();
+    checkPermissionState();
   }
 
-  Future<void> _checkPermissionState() async {
-    final ps = await _scanner.getPermissionState();
-    if (ps == PermissionState.limited) {
-      state = state.copyWith(isLimitedPermission: true);
+  Future<void> checkPermissionState() async {
+    try {
+      final ps = await _scanner.getPermissionState();
+      state = state.copyWith(
+        isLimitedPermission: ps == PermissionState.limited,
+        isPermissionDenied: ps == PermissionState.denied || ps == PermissionState.restricted,
+      );
+    } catch (e) {
+      debugPrint('[ScannerNotifier] Error checking permission: $e');
     }
   }
 
@@ -64,6 +82,10 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
     await _scanner.presentLimitedPhotoPicker();
     // Re-scan after managing photos
     await startScan();
+  }
+
+  Future<void> openSettings() async {
+    await PhotoManager.openSetting();
   }
 
   Future<void> startScan({bool onlyScreenshots = true}) async {
@@ -75,6 +97,7 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
       totalProgress: 0,
       statusMessage: 'Scanning phone screenshots...',
       newlyFound: [],
+      isPermissionDenied: false,
     );
 
     final ps = await _scanner.getPermissionState();
@@ -97,23 +120,35 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
       
       await repo.saveScannedScreenshots(items);
 
+      final message = items.isEmpty
+          ? 'Scan complete. No screenshots found in gallery.'
+          : 'Indexed ${items.length} screenshots.';
+
       state = state.copyWith(
         isScanning: false,
-        statusMessage: items.isEmpty
-            ? 'No screenshots found on device.'
-            : 'Scan complete. Indexed ${items.length} screenshots.',
+        statusMessage: message,
         newlyFound: items,
         isLimitedPermission: isLimited,
+        isPermissionDenied: false,
+        indexedCount: items.length,
+        lastScanTime: DateTime.now(),
       );
 
-      // Refresh screenshot list and category counters
+      // Refresh all dependent providers immediately
       await _ref.read(screenshotListProvider.notifier).refresh();
       await _ref.read(categoryListProvider.notifier).syncRemote();
+      _ref.invalidate(statsProvider);
+      _ref.invalidate(recentScreenshotsProvider);
     } else {
+      final errorMsg = result.errorOrNull ?? 'Scan failed';
+      final isDenied = errorMsg.toLowerCase().contains('denied') ||
+          errorMsg.toLowerCase().contains('permission');
+
       state = state.copyWith(
         isScanning: false,
-        statusMessage: result.errorOrNull ?? 'Scan failed',
+        statusMessage: errorMsg,
         isLimitedPermission: isLimited,
+        isPermissionDenied: isDenied,
       );
     }
   }

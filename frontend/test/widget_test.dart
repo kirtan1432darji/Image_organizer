@@ -17,7 +17,7 @@ void main() {
         child: AiScreenshotOrganizerApp(),
       ),
     );
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.byType(AiScreenshotOrganizerApp), findsOneWidget);
-    await tester.pumpAndSettle(const Duration(seconds: 3));
   });
 }

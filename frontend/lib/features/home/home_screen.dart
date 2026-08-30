@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants/color_constants.dart';
@@ -12,18 +14,58 @@ import 'widgets/ai_category_card.dart';
 import 'widgets/duplicate_suggestion_card.dart';
 import 'widgets/needs_review_section.dart';
 import 'widgets/recent_screenshots_carousel.dart';
+import 'widgets/scan_hero_card.dart';
+import 'widgets/scanner_status_banner.dart';
 import 'widgets/stats_header.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _hasCheckedInitialScan = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkInitialScan();
+    });
+  }
+
+  Future<void> _checkInitialScan() async {
+    if (_hasCheckedInitialScan) return;
+    _hasCheckedInitialScan = true;
+
+    // Only auto-trigger real MediaStore scan on physical mobile devices
+    if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
+      return;
+    }
+
+    try {
+      final stats = await ref.read(statsProvider.future);
+      final total = stats['total'] ?? 0;
+
+      if (total == 0 && mounted) {
+        ref.read(scannerProvider.notifier).startScan();
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(categoryListProvider);
     final recentScreenshots = ref.watch(recentScreenshotsProvider);
     final scannerState = ref.watch(scannerProvider);
     final isSyncing = ref.watch(syncProvider);
+    final statsAsync = ref.watch(statsProvider);
     final theme = Theme.of(context);
+
+    final totalScreenshots = statsAsync.valueOrNull?['total'] ?? recentScreenshots.length;
+    final isLibraryEmpty = totalScreenshots == 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -93,81 +135,64 @@ class HomeScreen extends ConsumerWidget {
       body: RefreshIndicator(
         onRefresh: () async {
           await ref.read(screenshotListProvider.notifier).refresh();
-          await ref.read(categoryListProvider.notifier).refresh();
+          await ref.read(categoryListProvider.notifier).syncRemote();
+          ref.invalidate(statsProvider);
+          ref.invalidate(recentScreenshotsProvider);
         },
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(
             parent: BouncingScrollPhysics(),
           ),
           slivers: [
-            // Scanning banner if active
-            if (scannerState.isScanning)
-              SliverToBoxAdapter(
-                child: Container(
-                  margin: const EdgeInsets.all(16),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: ColorConstants.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: ColorConstants.primary.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: ColorConstants.primary,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          scannerState.statusMessage,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: ColorConstants.primary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            // Status and permission banners
+            const SliverToBoxAdapter(
+              child: ScannerStatusBanner(),
+            ),
 
             // Top Stats Card
             const SliverPadding(
-              padding: EdgeInsets.fromLTRB(16, 12, 16, 16),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 16),
               sliver: SliverToBoxAdapter(
                 child: StatsHeader(),
               ),
             ),
 
-            // Needs Review Section
-            const SliverToBoxAdapter(
-              child: NeedsReviewSection(),
-            ),
-
-            // Recent Screenshots Carousel
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 20),
-                child: RecentScreenshotsCarousel(
-                  screenshots: recentScreenshots,
+            // First-run / Empty library Hero Card
+            if (isLibraryEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                  child: ScanHeroCard(
+                    onScan: () => ref.read(scannerProvider.notifier).startScan(),
+                  ),
                 ),
               ),
-            ),
+
+            // Needs Review Section
+            if (!isLibraryEmpty)
+              const SliverToBoxAdapter(
+                child: NeedsReviewSection(),
+              ),
+
+            // Recent Screenshots Carousel
+            if (!isLibraryEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 20),
+                  child: RecentScreenshotsCarousel(
+                    screenshots: recentScreenshots,
+                  ),
+                ),
+              ),
 
             // Duplicate Suggestion Card
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.only(bottom: 20),
-                child: DuplicateSuggestionCard(),
+            if (!isLibraryEmpty)
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: 20),
+                  child: DuplicateSuggestionCard(),
+                ),
               ),
-            ),
 
             // AI Categories Section Header
             SliverToBoxAdapter(
@@ -204,7 +229,7 @@ class HomeScreen extends ConsumerWidget {
                       title: 'No Categories Found',
                       description:
                           'Scan your gallery to organize screenshots into AI categories.',
-                      actionLabel: 'Scan Gallery Now',
+                      actionLabel: 'Scan Phone Screenshots',
                       onAction: () =>
                           ref.read(scannerProvider.notifier).startScan(),
                     ),
