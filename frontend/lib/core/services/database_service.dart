@@ -139,25 +139,6 @@ class DatabaseService {
     for (final tag in MockData.initialTags) {
       batch.insert('tags', tag.toMap());
     }
-    // Seed initial mock screenshots so the app is instantly usable
-    for (final screenshot in MockData.getSampleScreenshots()) {
-      batch.insert('screenshots', screenshot.toMap());
-      for (final tag in screenshot.tags) {
-        batch.insert('screenshot_tags', {
-          'screenshot_id': screenshot.id,
-          'tag_id': tag.id,
-        });
-      }
-      if (screenshot.ocrText != null) {
-        batch.insert('ocr_cache', {
-          'screenshot_id': screenshot.id,
-          'raw_text': screenshot.ocrText!,
-          'language': 'en',
-          'confidence': screenshot.confidence,
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-    }
     await batch.commit(noResult: true);
   }
 
@@ -441,6 +422,11 @@ class DatabaseService {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  Future<void> purgeMockScreenshots() async {
+    final db = await database;
+    await db.delete('screenshots', where: 'is_mock = 1 OR file_path LIKE ?', whereArgs: ['%assets/mock_screenshots%']);
   }
 
   Future<void> clearAiCache() async {

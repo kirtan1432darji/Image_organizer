@@ -1,9 +1,8 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/screenshot_model.dart';
-import '../../mock/mock_data.dart';
 import '../utils/result.dart';
 
 abstract class ScreenshotScannerService {
@@ -22,13 +21,13 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
   Future<bool> requestPermission() async {
     try {
       if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
-        return true; // Allow mock mode on desktop/web
+        return true;
       }
       final PermissionState ps = await PhotoManager.requestPermissionExtend();
       return ps.isAuth || ps.hasAccess;
     } catch (e) {
       debugPrint('Error requesting photo permission: $e');
-      return true; // Fallback to mock mode gracefully
+      return false;
     }
   }
 
@@ -39,13 +38,6 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
     Function(int current, int total)? onProgress,
   }) async {
     try {
-      if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
-        // Return rich mock dataset for desktop / test environments
-        final samples = MockData.getSampleScreenshots();
-        onProgress?.call(samples.length, samples.length);
-        return Result.success(samples);
-      }
-
       final hasPerm = await requestPermission();
       if (!hasPerm) {
         return Result.failure('Gallery permission not granted');
@@ -64,7 +56,7 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         );
       }
 
-      // Collect target albums (either screenshot specific or general gallery)
+      // Filter target albums (either screenshot specific or general gallery)
       final List<AssetPathEntity> targetAlbums = [];
       if (onlyScreenshots) {
         for (final album in albums) {
@@ -78,71 +70,89 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         }
       }
 
-      // If no screenshot specific album found, use the first/recent album
+      // If no screenshot specific album found, use the default/recent albums
       if (targetAlbums.isEmpty && albums.isNotEmpty) {
-        targetAlbums.add(albums.first);
+        targetAlbums.addAll(albums);
       }
 
       if (targetAlbums.isEmpty) {
-        final samples = MockData.getSampleScreenshots();
-        onProgress?.call(samples.length, samples.length);
-        return Result.success(samples);
+        return Result.success([]);
       }
 
-      final List<ScreenshotModel> scannedScreenshots = [];
+      final Map<String, ScreenshotModel> scannedMap = {};
+      const int pageSize = 80;
       int totalProcessed = 0;
 
       for (final album in targetAlbums) {
         final int totalAssets = await album.assetCountAsync;
-        final List<AssetEntity> assets = await album.getAssetListRange(
-          start: 0,
-          end: totalAssets.clamp(0, 100),
-        );
+        int page = 0;
 
-        for (int i = 0; i < assets.length; i++) {
-          final asset = assets[i];
-          final file = await asset.file;
-          if (file == null) continue;
-
-          final stat = await file.stat();
-
-          final model = ScreenshotModel(
-            id: _uuid.v4(),
-            deviceAssetId: asset.id,
-            filePath: file.path,
-            fileName: asset.title ??
-                'Screenshot_${asset.createDateTime.millisecondsSinceEpoch}.png',
-            createdAt: asset.createDateTime,
-            width: asset.width,
-            height: asset.height,
-            fileSize: stat.size,
-            categoryId: 'unsorted',
-            categoryName: 'Unsorted',
-            subcategory: '',
-            confidence: 0.0,
-            sourceApp: _inferSourceApp(asset.title ?? file.path),
-            isFavorite: asset.isFavorite,
-            isReviewed: false,
-            isSynced: false,
-            ocrStatus: 'pending',
-            lastScannedAt: DateTime.now(),
-            isMock: false,
+        while (page * pageSize < totalAssets) {
+          final List<AssetEntity> assets = await album.getAssetListPaged(
+            page: page,
+            size: pageSize,
           );
 
-          scannedScreenshots.add(model);
-          totalProcessed++;
-          onProgress?.call(totalProcessed, totalProcessed);
+          if (assets.isEmpty) break;
+
+          for (final asset in assets) {
+            // Filter by date if requested
+            if (since != null && asset.createDateTime.isBefore(since)) {
+              continue;
+            }
+
+            // Deduplicate by deviceAssetId
+            if (scannedMap.containsKey(asset.id)) {
+              continue;
+            }
+
+            // Try to obtain file path if available, but do not skip if null
+            String localPath = '';
+            int fileSize = 0;
+            try {
+              final file = await asset.file;
+              if (file != null) {
+                localPath = file.path;
+                fileSize = await file.length();
+              }
+            } catch (_) {}
+
+            final model = ScreenshotModel(
+              id: _uuid.v4(),
+              deviceAssetId: asset.id,
+              filePath: localPath,
+              fileName: asset.title ??
+                  'Screenshot_${asset.createDateTime.millisecondsSinceEpoch}.png',
+              createdAt: asset.createDateTime,
+              width: asset.width,
+              height: asset.height,
+              fileSize: fileSize,
+              categoryId: 'unsorted',
+              categoryName: 'Unsorted',
+              subcategory: '',
+              confidence: 0.0,
+              sourceApp: _inferSourceApp(asset.title ?? localPath),
+              isFavorite: asset.isFavorite,
+              isReviewed: false,
+              isSynced: false,
+              ocrStatus: 'pending',
+              lastScannedAt: DateTime.now(),
+              isMock: false,
+            );
+
+            scannedMap[asset.id] = model;
+            totalProcessed++;
+            onProgress?.call(totalProcessed, totalAssets);
+          }
+
+          page++;
         }
       }
 
-      if (scannedScreenshots.isEmpty) {
-        return Result.success(MockData.getSampleScreenshots());
-      }
-
-      return Result.success(scannedScreenshots);
+      return Result.success(scannedMap.values.toList());
     } catch (e) {
       debugPrint('Error scanning gallery screenshots: $e');
-      return Result.success(MockData.getSampleScreenshots());
+      return Result.failure('Failed to scan screenshots: $e');
     }
   }
 

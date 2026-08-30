@@ -16,7 +16,8 @@ class ScreenshotNotifier extends AsyncNotifier<List<ScreenshotModel>> {
 
   Future<List<ScreenshotModel>> _fetchScreenshots() async {
     final repo = ref.read(screenshotRepositoryProvider);
-    return repo.getScreenshots(limit: 100);
+    await repo.purgeMockData();
+    return repo.getScreenshots(limit: 200);
   }
 
   Future<void> refresh() async {

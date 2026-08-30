@@ -1,4 +1,4 @@
-import '../core/services/database_service.dart';
+﻿import '../core/services/database_service.dart';
 import '../core/services/api_client.dart';
 import '../core/services/ocr_service.dart';
 import '../core/utils/result.dart';
@@ -17,6 +17,7 @@ abstract class ScreenshotRepository {
   });
 
   Future<ScreenshotModel?> getScreenshotById(String id);
+  Future<void> saveScannedScreenshots(List<ScreenshotModel> screenshots);
   Future<void> toggleFavorite(String id, bool isFavorite);
   Future<void> updateCategory(String id, String categoryId, String categoryName);
   Future<void> addTagToScreenshot(String id, TagModel tag);
@@ -25,6 +26,7 @@ abstract class ScreenshotRepository {
   Future<void> deleteScreenshot(String id);
   Future<Result<ScreenshotModel>> runOcrAndClassification(String id);
   Future<Map<String, int>> getStats();
+  Future<void> purgeMockData();
 }
 
 class ScreenshotRepositoryImpl implements ScreenshotRepository {
@@ -40,6 +42,11 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
   })  : _db = db ?? DatabaseService(),
         _apiClient = apiClient ?? ApiClient(),
         _ocrService = ocrService ?? LocalOcrService();
+
+  @override
+  Future<void> purgeMockData() async {
+    await _db.purgeMockScreenshots();
+  }
 
   @override
   Future<List<ScreenshotModel>> getScreenshots({
@@ -64,8 +71,22 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
   }
 
   @override
-  Future<void> toggleFavorite(String id, bool isFavorite) {
-    return _db.toggleFavorite(id, isFavorite);
+  Future<void> saveScannedScreenshots(List<ScreenshotModel> screenshots) async {
+    for (final s in screenshots) {
+      await _db.insertScreenshot(s);
+    }
+    // Push batch metadata to SQL Server backend asynchronously
+    try {
+      await _apiClient.batchScanScreenshots(screenshots);
+    } catch (_) {}
+  }
+
+  @override
+  Future<void> toggleFavorite(String id, bool isFavorite) async {
+    await _db.toggleFavorite(id, isFavorite);
+    try {
+      await _apiClient.toggleFavorite(id, isFavorite);
+    } catch (_) {}
   }
 
   @override
@@ -107,6 +128,9 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
     final item = await _db.getScreenshotById(id);
     if (item != null) {
       await _db.updateScreenshot(item.copyWith(isReviewed: true));
+      try {
+        await _apiClient.markReviewed(id, true);
+      } catch (_) {}
     }
   }
 

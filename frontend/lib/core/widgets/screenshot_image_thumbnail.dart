@@ -1,4 +1,4 @@
-import 'dart:io';
+﻿import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -46,25 +46,7 @@ class ScreenshotImageThumbnail extends StatelessWidget {
   }
 
   Widget _buildImageContent(BuildContext context) {
-    // 1. Local File on device (Android / iOS)
-    if (!kIsWeb && screenshot.filePath.isNotEmpty) {
-      final file = File(screenshot.filePath);
-      if (file.existsSync()) {
-        return Image.file(
-          file,
-          fit: fit,
-          width: width,
-          height: height,
-          errorBuilder: (_, __, ___) => _buildFallback(context),
-          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
-            if (wasSynchronouslyLoaded || frame != null) return child;
-            return _buildPlaceholder(context);
-          },
-        );
-      }
-    }
-
-    // 2. PhotoManager AssetEntity Thumbnail
+    // 1. Primary: PhotoManager AssetEntity Thumbnail (Optimized memory)
     if (!kIsWeb && screenshot.deviceAssetId.isNotEmpty) {
       return FutureBuilder<AssetEntity?>(
         future: AssetEntity.fromId(screenshot.deviceAssetId),
@@ -79,19 +61,45 @@ class ScreenshotImageThumbnail extends StatelessWidget {
                     fit: fit,
                     width: width,
                     height: height,
-                    errorBuilder: (_, __, ___) => _buildFallback(context),
+                    errorBuilder: (_, __, ___) => _buildFileFallback(context),
                   );
                 }
                 return _buildPlaceholder(context);
               },
             );
           }
-          return _buildPlaceholder(context);
+          return _buildFileFallback(context);
         },
       );
     }
 
-    // 3. Network URL / Mock fallback
+    return _buildFileFallback(context);
+  }
+
+  Widget _buildFileFallback(BuildContext context) {
+    // 2. Secondary fallback: Local File on device if exists
+    if (!kIsWeb && screenshot.filePath.isNotEmpty && !screenshot.filePath.startsWith('assets/')) {
+      final file = File(screenshot.filePath);
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          fit: fit,
+          width: width,
+          height: height,
+          errorBuilder: (_, __, ___) => _buildNetworkOrPlaceholder(context),
+          frameBuilder: (context, child, frame, wasSynchronouslyLoaded) {
+            if (wasSynchronouslyLoaded || frame != null) return child;
+            return _buildPlaceholder(context);
+          },
+        );
+      }
+    }
+
+    return _buildNetworkOrPlaceholder(context);
+  }
+
+  Widget _buildNetworkOrPlaceholder(BuildContext context) {
+    // 3. Network URL fallback
     if (screenshot.filePath.startsWith('http')) {
       return CachedNetworkImage(
         imageUrl: screenshot.filePath,
@@ -103,7 +111,7 @@ class ScreenshotImageThumbnail extends StatelessWidget {
       );
     }
 
-    // 4. Default visual placeholder
+    // 4. Fallback Placeholder Icon
     return _buildFallback(context);
   }
 
