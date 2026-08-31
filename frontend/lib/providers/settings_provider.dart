@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../core/constants/api_constants.dart';
 import '../repositories/settings_repository.dart';
 
 final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
@@ -17,7 +18,7 @@ class SettingsState {
     this.themeMode = ThemeMode.system,
     this.autoScan = true,
     this.scanOnlyScreenshots = true,
-    this.backendUrl = 'http://10.0.2.2:5000/api',
+    this.backendUrl = ApiConstants.defaultBaseUrl,
     this.isFirstLaunch = false,
   });
 

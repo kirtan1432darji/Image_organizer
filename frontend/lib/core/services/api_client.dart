@@ -242,15 +242,20 @@ class ApiClient {
     try {
       final response = await _dio.post(
         ApiConstants.batchScan,
-        data: {'items': items},
+        data: {
+          'screenshots': items,
+          'items': items,
+        },
       );
 
       final unwrapped = _unwrapData(response.data);
       if (unwrapped is List) {
         return Result.success(unwrapped.map((e) => Map<String, dynamic>.from(e as Map)).toList());
-      } else if (unwrapped is Map && unwrapped['results'] is List) {
-        final list = unwrapped['results'] as List;
-        return Result.success(list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      } else if (unwrapped is Map) {
+        final list = (unwrapped['items'] ?? unwrapped['results']) as List?;
+        if (list != null) {
+          return Result.success(list.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+        }
       }
       return Result.success([]);
     } on DioException catch (e) {

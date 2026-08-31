@@ -1,8 +1,9 @@
 class ApiConstants {
   ApiConstants._();
 
-  // Configurable base URL (default for emulator, override in Settings or auto-detect on physical device)
-  static const String defaultBaseUrl = 'http://10.0.2.2:5000/api';
+  // Configurable base URL: 127.0.0.1:5000 works on physical Android via `adb reverse tcp:5000 tcp:5000`
+  // and local desktop. Users can customize in Settings Screen for remote/LAN IPs.
+  static const String defaultBaseUrl = 'http://127.0.0.1:5000/api';
   
   // Timeout configurations
   static const Duration connectTimeout = Duration(seconds: 15);
@@ -18,7 +19,7 @@ class ApiConstants {
   // Screenshot Endpoints
   static const String screenshots = '/screenshots';
   static const String scanScreenshot = '/screenshots/scan';
-  static const String batchScan = '/screenshots/batch-scan';
+  static const String batchScan = '/screenshots/batch';
   static const String classifyScreenshot = '/screenshots/classify';
   static const String batchClassify = '/screenshots/batch-classify';
 
