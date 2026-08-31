@@ -6,6 +6,7 @@ import '../../models/category_model.dart';
 import '../../models/screenshot_model.dart';
 import '../../models/sync_queue_item_model.dart';
 import '../../models/tag_model.dart';
+import 'media_classifier.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -515,12 +516,82 @@ class DatabaseService {
       }
     }
 
-    // 4. Normalize any screenshots with null, empty, or 'unsorted' category
-    await db.update(
+    // 4. Auto-classify all unsorted screenshots into appropriate Categories & Subcategories
+    await autoClassifyAndOrganizeScreenshots();
+  }
+
+  /// Automatically categorizes and organizes all unsorted screenshots into proper Category & Subcategory folders
+  Future<int> autoClassifyAndOrganizeScreenshots() async {
+    final db = await database;
+    const classifier = MediaClassifier();
+
+    // Fetch all categories
+    final catRows = await db.query('categories');
+    final catMap = <String, CategoryModel>{};
+    for (final r in catRows) {
+      final c = CategoryModel.fromMap(r);
+      catMap[c.name.toLowerCase()] = c;
+    }
+
+    // Fetch screenshots that are unsorted or have empty subcategory
+    final items = await db.query(
       'screenshots',
-      {'category_id': CategoryModel.unsortedId, 'category_name': CategoryModel.unsortedName},
-      where: '(category_id IS NULL OR category_id = \'\' OR category_id = \'unsorted\') AND is_mock = 0',
+      where: 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\')',
+      whereArgs: [CategoryModel.unsortedId, CategoryModel.unsortedName],
     );
+
+    int organized = 0;
+
+    for (final row in items) {
+      final id = row['id'] as String;
+      final fileName = row['file_name'] as String? ?? '';
+      final filePath = row['file_path'] as String? ?? '';
+      final sourceApp = row['source_app'] as String? ?? '';
+      final ocrText = row['ocr_text'] as String? ?? '';
+
+      final result = classifier.classifyMediaItem(
+        fileName: fileName,
+        filePath: filePath,
+        sourceApp: sourceApp,
+        ocrText: ocrText,
+      );
+
+      final targetCat = catMap[result.categoryName.toLowerCase()];
+      final targetCatId = targetCat?.id ?? CategoryModel.unsortedId;
+      final targetCatName = targetCat?.name ?? result.categoryName;
+
+      await db.update(
+        'screenshots',
+        {
+          'category_id': targetCatId,
+          'category_name': targetCatName,
+          'subcategory': result.subcategory,
+          'confidence': result.confidence,
+          'is_reviewed': result.confidence >= 0.85 ? 1 : 0,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      // Add tags
+      for (final tagStr in result.tags) {
+        final tagId = tagStr.toLowerCase().replaceAll(' ', '_');
+        await db.insert(
+          'tags',
+          {'id': tagId, 'name': tagStr, 'color_hex': '6366F1'},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        await db.insert(
+          'screenshot_tags',
+          {'screenshot_id': id, 'tag_id': tagId},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+
+      organized++;
+    }
+
+    return organized;
   }
 
   // ==================== TAGS ====================
