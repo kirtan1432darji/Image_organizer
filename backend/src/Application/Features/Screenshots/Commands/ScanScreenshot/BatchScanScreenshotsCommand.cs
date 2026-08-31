@@ -1,4 +1,4 @@
-﻿using FluentValidation;
+using FluentValidation;
 using MediatR;
 using AutoMapper;
 using AI.ScreenshotOrganizer.Application.Common.Exceptions;
@@ -96,6 +96,88 @@ public class BatchScanScreenshotsCommandHandler : IRequestHandler<BatchScanScree
                 if (!string.IsNullOrWhiteSpace(req.OCRText))
                 {
                     screenshot.OCRStatus = "completed";
+                }
+
+                // Auto classification into Category & Subcategory folders
+                if ((req.AutoClassify ?? true) && (isNew || screenshot.CategoryId == null))
+                {
+                    var classification = await _aiClassificationService.ClassifyScreenshotAsync(new ClassifyScreenshotRequestDto
+                    {
+                        ScreenshotId = screenshot.Id.ToString(),
+                        FileName = fileName,
+                        OCRText = screenshot.OCRText,
+                        VisionDescription = screenshot.VisionDescription,
+                        SourceApp = screenshot.SourceApp
+                    }, cancellationToken);
+
+                    screenshot.Confidence = classification.Confidence;
+                    screenshot.IsReviewed = classification.Confidence >= 0.85;
+
+                    if (!string.IsNullOrEmpty(classification.Category))
+                    {
+                        var category = await _unitOfWork.Categories.GetByNameAsync(classification.Category, userId, cancellationToken);
+                        if (category == null)
+                        {
+                            category = new Category
+                            {
+                                Id = Guid.NewGuid(),
+                                Name = classification.Category,
+                                UserId = userId,
+                                CreatedByAI = true,
+                                CreatedDate = DateTime.UtcNow
+                            };
+                            await _unitOfWork.Categories.AddAsync(category, cancellationToken);
+                        }
+                        screenshot.CategoryId = category.Id;
+                        screenshot.Category = category;
+
+                        if (!string.IsNullOrEmpty(classification.SubCategory))
+                        {
+                            var subCat = await _unitOfWork.Categories.GetByNameAsync(classification.SubCategory, userId, cancellationToken);
+                            if (subCat == null)
+                            {
+                                subCat = new Category
+                                {
+                                    Id = Guid.NewGuid(),
+                                    Name = classification.SubCategory,
+                                    ParentCategoryId = category.Id,
+                                    UserId = userId,
+                                    CreatedByAI = true,
+                                    CreatedDate = DateTime.UtcNow
+                                };
+                                await _unitOfWork.Categories.AddAsync(subCat, cancellationToken);
+                            }
+                            screenshot.SubCategoryId = subCat.Id;
+                            screenshot.SubCategory = subCat;
+                        }
+
+                        if (classification.Tags != null)
+                        {
+                            foreach (var tagName in classification.Tags)
+                            {
+                                var tag = await _unitOfWork.Tags.GetByNameAsync(tagName, userId, cancellationToken);
+                                if (tag == null)
+                                {
+                                    tag = new Tag
+                                    {
+                                        Id = Guid.NewGuid(),
+                                        Name = tagName,
+                                        UserId = userId,
+                                        CreatedDate = DateTime.UtcNow
+                                    };
+                                    await _unitOfWork.Tags.AddAsync(tag, cancellationToken);
+                                }
+                                if (!screenshot.ScreenshotTags.Any(st => st.TagId == tag.Id))
+                                {
+                                    screenshot.ScreenshotTags.Add(new ScreenshotTag
+                                    {
+                                        ScreenshotId = screenshot.Id,
+                                        TagId = tag.Id
+                                    });
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (isNew)
