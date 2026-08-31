@@ -48,6 +48,8 @@ class CategoryRepositoryImpl implements CategoryRepository {
     }
 
     // Run fallback repair with local categories
+    await _db.upsertCategories(CategoryModel.defaultCategories);
+    await _db.autoClassifyAndOrganizeScreenshots();
     final localCats = await _db.getCategories();
     await _db.migrateCategoryIdsAndRepairData(localCats);
   }

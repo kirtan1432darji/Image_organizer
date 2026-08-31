@@ -14,6 +14,91 @@ class CategoryModel {
     orderIndex: 999,
   );
 
+  static const List<CategoryModel> defaultCategories = [
+    CategoryModel(
+      id: 'receipts-invoices',
+      name: 'Receipts & Invoices',
+      iconName: 'receipt_long',
+      colorHex: '10B981',
+      description: 'Receipts, bills, orders & invoices',
+      isSystem: true,
+      orderIndex: 1,
+    ),
+    CategoryModel(
+      id: 'finance-banking',
+      name: 'Finance & Banking',
+      iconName: 'account_balance_wallet',
+      colorHex: '3B82F6',
+      description: 'Bank statements, UPI, crypto & investments',
+      isSystem: true,
+      orderIndex: 2,
+    ),
+    CategoryModel(
+      id: 'code-tech',
+      name: 'Code & Tech',
+      iconName: 'code',
+      colorHex: '8B5CF6',
+      description: 'Code snippets, error logs & terminal',
+      isSystem: true,
+      orderIndex: 3,
+    ),
+    CategoryModel(
+      id: 'social-chat',
+      name: 'Social & Chat',
+      iconName: 'chat_bubble_outline',
+      colorHex: 'EC4899',
+      description: 'WhatsApp, Telegram, Twitter, Instagram & chats',
+      isSystem: true,
+      orderIndex: 4,
+    ),
+    CategoryModel(
+      id: 'documents-ids',
+      name: 'Documents & IDs',
+      iconName: 'description',
+      colorHex: 'F59E0B',
+      description: 'Passports, IDs, certificates & contracts',
+      isSystem: true,
+      orderIndex: 5,
+    ),
+    CategoryModel(
+      id: 'travel-tickets',
+      name: 'Travel & Tickets',
+      iconName: 'flight_takeoff',
+      colorHex: '06B6D4',
+      description: 'Boarding passes, train tickets & hotel bookings',
+      isSystem: true,
+      orderIndex: 6,
+    ),
+    CategoryModel(
+      id: 'shopping-wishlist',
+      name: 'Shopping & Wishlist',
+      iconName: 'shopping_bag',
+      colorHex: 'F97316',
+      description: 'Product carts, wishlists & coupons',
+      isSystem: true,
+      orderIndex: 7,
+    ),
+    CategoryModel(
+      id: 'notes-knowledge',
+      name: 'Notes & Knowledge',
+      iconName: 'edit_note',
+      colorHex: '6366F1',
+      description: 'Articles, recipes, notes & research',
+      isSystem: true,
+      orderIndex: 8,
+    ),
+    CategoryModel(
+      id: 'memes-humor',
+      name: 'Memes & Humor',
+      iconName: 'sentiment_satisfied_alt',
+      colorHex: 'EAB308',
+      description: 'Memes, jokes & funny snapshots',
+      isSystem: true,
+      orderIndex: 9,
+    ),
+    unsortedCategory,
+  ];
+
   final String id;
   final String name;
   final String iconName;

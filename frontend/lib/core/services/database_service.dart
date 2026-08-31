@@ -131,8 +131,10 @@ class DatabaseService {
       )
     ''');
 
-    // Seed default canonical Unsorted category
-    await db.insert('categories', CategoryModel.unsortedCategory.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    // Seed default canonical categories
+    for (final cat in CategoryModel.defaultCategories) {
+      await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    }
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -399,8 +401,25 @@ class DatabaseService {
       }
     }
 
-    // 3. Query all categories from SQLite
-    final maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    // 3. Ensure all default categories are seeded in SQLite
+    List<Map<String, dynamic>> maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    if (maps.length <= 1) {
+      for (final cat in CategoryModel.defaultCategories) {
+        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await autoClassifyAndOrganizeScreenshots();
+      // Re-run count queries
+      final updatedIdCounts = await db.rawQuery('SELECT category_id, COUNT(*) as count FROM screenshots WHERE is_mock = 0 GROUP BY category_id');
+      for (final row in updatedIdCounts) {
+        final catId = row['category_id'] as String?;
+        final count = row['count'] as int? ?? 0;
+        if (catId != null && catId.isNotEmpty) {
+          idCounts[catId.toLowerCase()] = count;
+        }
+      }
+      maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    }
+
     final categories = <CategoryModel>[];
     bool hasUnsorted = false;
 
@@ -525,18 +544,25 @@ class DatabaseService {
     final db = await database;
     const classifier = MediaClassifier();
 
-    // Fetch all categories
-    final catRows = await db.query('categories');
+    // 1. Ensure all default categories exist in SQLite
+    var catRows = await db.query('categories');
+    if (catRows.length <= 1) {
+      for (final cat in CategoryModel.defaultCategories) {
+        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      catRows = await db.query('categories');
+    }
+
     final catMap = <String, CategoryModel>{};
     for (final r in catRows) {
       final c = CategoryModel.fromMap(r);
       catMap[c.name.toLowerCase()] = c;
     }
 
-    // Fetch screenshots that are unsorted or have empty subcategory
+    // 2. Fetch all screenshots needing proper folder organization
     final items = await db.query(
       'screenshots',
-      where: 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\')',
+      where: 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\' OR subcategory IS NULL OR subcategory = \'\')',
       whereArgs: [CategoryModel.unsortedId, CategoryModel.unsortedName],
     );
 
