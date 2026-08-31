@@ -25,9 +25,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>We need photo gallery access to scan and organize your existing screenshots using on-device OCR and AI categorization without modifying any photos.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Permission needed to access screenshots metadata in your photo library.</string>
+	<string>We need access to your photo library to organize photos, screenshots, and screen recordings.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

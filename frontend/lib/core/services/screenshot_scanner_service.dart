@@ -3,14 +3,26 @@ import 'package:flutter/foundation.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:uuid/uuid.dart';
 import '../../models/screenshot_model.dart';
+import '../constants/media_scanner_constants.dart';
 import '../utils/result.dart';
+import 'direct_path_scanner.dart';
+import 'media_classifier.dart';
 
 abstract class ScreenshotScannerService {
   Future<PermissionState> requestPermission();
   Future<PermissionState> getPermissionState();
   Future<void> presentLimitedPhotoPicker();
+
+  /// Scans device screenshots (compatible with existing mobile app callers)
   Future<Result<List<ScreenshotModel>>> scanScreenshots({
     bool onlyScreenshots = true,
+    DateTime? since,
+    Function(int current, int total)? onProgress,
+  });
+
+  /// Scans all authorized device media across images and videos
+  Future<Result<List<ScreenshotModel>>> scanAllMedia({
+    List<DeviceMediaType>? targetTypes,
     DateTime? since,
     Function(int current, int total)? onProgress,
   });
@@ -18,6 +30,15 @@ abstract class ScreenshotScannerService {
 
 class PhotoManagerScannerService implements ScreenshotScannerService {
   final _uuid = const Uuid();
+  final MediaClassifier _classifier;
+  final DirectPathScanner _directPathScanner;
+
+  PhotoManagerScannerService({
+    MediaClassifier classifier = const MediaClassifier(),
+    DirectPathScanner? directPathScanner,
+  })  : _classifier = classifier,
+        _directPathScanner = directPathScanner ??
+            DirectPathScanner(classifier: classifier);
 
   @override
   Future<PermissionState> getPermissionState() async {
@@ -26,7 +47,12 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         return PermissionState.authorized;
       }
       return await PhotoManager.getPermissionState(
-        requestOption: const PermissionRequestOption(),
+        requestOption: const PermissionRequestOption(
+          androidPermission: AndroidPermission(
+            type: RequestType.common,
+            mediaLocation: false,
+          ),
+        ),
       );
     } catch (e) {
       debugPrint('[ScannerService] Error checking permission: $e');
@@ -41,7 +67,12 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         return PermissionState.authorized;
       }
       final PermissionState ps = await PhotoManager.requestPermissionExtend(
-        requestOption: const PermissionRequestOption(),
+        requestOption: const PermissionRequestOption(
+          androidPermission: AndroidPermission(
+            type: RequestType.common,
+            mediaLocation: false,
+          ),
+        ),
       );
       debugPrint('[ScannerService] Permission requested. Result: $ps');
       return ps;
@@ -54,7 +85,7 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
   @override
   Future<void> presentLimitedPhotoPicker() async {
     try {
-      if (Platform.isAndroid || Platform.isIOS) {
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
         await PhotoManager.presentLimited();
       }
     } catch (e) {
@@ -67,71 +98,98 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
     bool onlyScreenshots = true,
     DateTime? since,
     Function(int current, int total)? onProgress,
+  }) {
+    return _scanMediaInternal(
+      onlyScreenshots: onlyScreenshots,
+      targetTypes: onlyScreenshots ? [DeviceMediaType.screenshot] : null,
+      since: since,
+      onProgress: onProgress,
+    );
+  }
+
+  @override
+  Future<Result<List<ScreenshotModel>>> scanAllMedia({
+    List<DeviceMediaType>? targetTypes,
+    DateTime? since,
+    Function(int current, int total)? onProgress,
+  }) {
+    return _scanMediaInternal(
+      onlyScreenshots: false,
+      targetTypes: targetTypes,
+      since: since,
+      onProgress: onProgress,
+    );
+  }
+
+  Future<Result<List<ScreenshotModel>>> _scanMediaInternal({
+    required bool onlyScreenshots,
+    List<DeviceMediaType>? targetTypes,
+    DateTime? since,
+    Function(int current, int total)? onProgress,
   }) async {
     try {
       if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
-        // Return empty on desktop / web unless real assets exist
         return Result.success([]);
       }
 
       final perm = await requestPermission();
       if (!perm.isAuth && !perm.hasAccess) {
         debugPrint('[ScannerService] Permission denied (State: $perm)');
-        return Result.failure('Gallery permission denied. Please grant photo access in Settings.');
+        return Result.failure(
+          'Gallery permission denied. Please grant photo access in Settings.',
+        );
       }
 
-      debugPrint('[ScannerService] Scanning albums... (Permission: $perm)');
+      debugPrint('[ScannerService] Starting discovery... (Permission: $perm, Platform: ${Platform.operatingSystem})');
 
-      // 1. Fetch albums from MediaStore / PhotoManager
+      final Map<String, ScreenshotModel> scannedMap = {};
+      final Set<String> canonicalPathSet = {};
+      int totalScannedCount = 0;
+
+      // -----------------------------------------------------------------
+      // 1. PRIMARY DISCOVERY: MediaStore (Android) & PhotoKit (iOS)
+      // -----------------------------------------------------------------
+      final RequestType reqType = onlyScreenshots ? RequestType.image : RequestType.common;
       List<AssetPathEntity> albums = await PhotoManager.getAssetPathList(
-        type: RequestType.image,
+        type: reqType,
         onlyAll: false,
       );
 
       if (albums.isEmpty) {
         albums = await PhotoManager.getAssetPathList(
-          type: RequestType.image,
+          type: reqType,
           onlyAll: true,
         );
       }
 
-      debugPrint('[ScannerService] Found ${albums.length} total albums on device: ${albums.map((a) => a.name).toList()}');
+      debugPrint('[ScannerService] Found ${albums.length} albums via PhotoManager.');
 
-      // 2. Identify screenshot-specific albums across all Android OEMs
-      final List<AssetPathEntity> targetAlbums = [];
+      // Filter target albums if only scanning screenshots
+      List<AssetPathEntity> albumsToScan = albums;
+      bool filterAssetsByNameFallback = false;
+
       if (onlyScreenshots) {
-        for (final album in albums) {
-          final name = album.name.toLowerCase();
-          if (_isScreenshotAlbumName(name)) {
-            targetAlbums.add(album);
-          }
+        final screenshotAlbums = albums.where((a) {
+          final name = a.name.toLowerCase();
+          return _isScreenshotAlbumName(name);
+        }).toList();
+
+        if (screenshotAlbums.isNotEmpty) {
+          albumsToScan = screenshotAlbums;
+        } else if (albums.isNotEmpty) {
+          // If no explicit screenshot album exists, scan general album and filter by file name
+          albumsToScan = [albums.first];
+          filterAssetsByNameFallback = true;
         }
       }
 
-      // If no dedicated screenshot album is found, scan all images and filter
-      bool shouldFilterAssetsByName = false;
-      if (targetAlbums.isEmpty && albums.isNotEmpty) {
-        targetAlbums.add(albums.first);
-        if (onlyScreenshots) {
-          shouldFilterAssetsByName = true;
-        }
-      }
-
-      if (targetAlbums.isEmpty) {
-        debugPrint('[ScannerService] No albums available on device.');
-        return Result.success([]);
-      }
-
-      final Map<String, ScreenshotModel> scannedMap = {};
-      int totalScannedCount = 0;
-
-      // 3. Scan each target album with full pagination (no arbitrary first-100 cut-off)
-      for (final album in targetAlbums) {
+      for (final album in albumsToScan) {
         final int totalAssets = await album.assetCountAsync;
-        debugPrint('[ScannerService] Album "${album.name}" has $totalAssets assets. Fetching with pagination...');
-
         const int pageSize = 80;
         int currentPage = 0;
+
+        final isScreenshotSmartAlbum = album.isAll || album.name.toLowerCase() == 'screenshots';
+        final isScreenRecordingSmartAlbum = album.name.toLowerCase().contains('screen recording');
 
         while (currentPage * pageSize < totalAssets) {
           final int start = currentPage * pageSize;
@@ -145,34 +203,57 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
           if (pageAssets.isEmpty) break;
 
           for (final asset in pageAssets) {
-            // Check deduplication
+            // Deduplicate by PhotoKit / MediaStore asset ID
             if (scannedMap.containsKey(asset.id)) continue;
 
-            final fileName = asset.title ?? 'Screenshot_${asset.createDateTime.millisecondsSinceEpoch}.png';
+            final fileName = asset.title ??
+                'Media_${asset.createDateTime.millisecondsSinceEpoch}.${asset.type == AssetType.video ? "mp4" : "png"}';
 
-            // Filter if we are scanning from general album
-            if (shouldFilterAssetsByName && !_isScreenshotFileName(fileName)) {
+            if (filterAssetsByNameFallback && !_classifier.isScreenshotFileName(fileName)) {
               continue;
             }
 
-            // Optional incremental filter
             if (since != null && asset.createDateTime.isBefore(since)) {
               continue;
             }
 
-            // Inferred source application name
-            final sourceApp = _inferSourceApp(fileName);
-
-            // Attempt to resolve file path for fallback (do not skip if null!)
+            // Resolve file path for fallback caching & deduplication (do not block if null)
             String resolvedPath = '';
             try {
               final f = await asset.file;
               if (f != null) {
                 resolvedPath = f.path;
+                canonicalPathSet.add(resolvedPath.toLowerCase());
               }
-            } catch (_) {
-              // Scoped storage might not yield raw file path, asset.id is primary
+            } catch (_) {}
+
+            // Classify according to platform PhotoKit or Android MediaStore
+            final DeviceMediaType mediaType = Platform.isIOS
+                ? _classifier.classifyIosMedia(
+                    albumName: album.name,
+                    isScreenshotSmartAlbum: isScreenshotSmartAlbum,
+                    isScreenRecordingSmartAlbum: isScreenRecordingSmartAlbum,
+                    fileName: fileName,
+                    isVideo: asset.type == AssetType.video,
+                  )
+                : _classifier.classifyAndroidMedia(
+                    filePath: resolvedPath,
+                    albumName: album.name,
+                    fileName: fileName,
+                    mimeType: asset.mimeType,
+                    isVideo: asset.type == AssetType.video,
+                  );
+
+            if (onlyScreenshots && mediaType != DeviceMediaType.screenshot) {
+              continue;
             }
+
+            if (targetTypes != null && !targetTypes.contains(mediaType)) {
+              continue;
+            }
+
+            final sourceApp = _classifier.inferSourceApp(resolvedPath.isNotEmpty ? resolvedPath : fileName) ??
+                mediaType.displayName;
 
             final model = ScreenshotModel(
               id: _uuid.v4(),
@@ -205,9 +286,35 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         }
       }
 
+      // -----------------------------------------------------------------
+      // 2. AUXILIARY DIRECT FILESYSTEM SCANNING (Android Only)
+      // -----------------------------------------------------------------
+      if (Platform.isAndroid && !kIsWeb) {
+        final directItems = _directPathScanner.scanDirectories(
+          onlyScreenshots: onlyScreenshots,
+        );
+
+        for (final item in directItems) {
+          final normalizedKey = item.filePath.toLowerCase();
+          // Avoid duplicate entries if already discovered via MediaStore
+          if (canonicalPathSet.contains(normalizedKey)) continue;
+          canonicalPathSet.add(normalizedKey);
+
+          if (targetTypes != null && !targetTypes.contains(item.mediaType)) {
+            continue;
+          }
+
+          final sourceApp = _classifier.inferSourceApp(item.filePath) ?? item.mediaType.displayName;
+          final model = item.toScreenshotModel(sourceApp: sourceApp);
+
+          scannedMap[model.id] = model;
+          totalScannedCount++;
+        }
+      }
+
       final results = scannedMap.values.toList();
       results.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      debugPrint('[ScannerService] Scan complete. Found ${results.length} valid device screenshots.');
+      debugPrint('[ScannerService] Scan complete. Discovered ${results.length} total media items.');
 
       return Result.success(results);
     } catch (e, stack) {
@@ -228,31 +335,5 @@ class PhotoManagerScannerService implements ScreenshotScannerService {
         lower.contains('screen recording') ||
         lower.contains('dcim/screenshots') ||
         lower.contains('pictures/screenshots');
-  }
-
-  bool _isScreenshotFileName(String fileName) {
-    final lower = fileName.toLowerCase();
-    return lower.contains('screenshot') ||
-        lower.contains('screen_shot') ||
-        lower.contains('screenshot_') ||
-        lower.contains('scrn') ||
-        lower.contains('capture') ||
-        lower.contains('screencap');
-  }
-
-  String? _inferSourceApp(String pathOrTitle) {
-    final lower = pathOrTitle.toLowerCase();
-    if (lower.contains('whatsapp')) return 'WhatsApp';
-    if (lower.contains('slack')) return 'Slack';
-    if (lower.contains('twitter') || lower.contains('x_') || lower.contains('x.com')) return 'X / Twitter';
-    if (lower.contains('instagram')) return 'Instagram';
-    if (lower.contains('amazon')) return 'Amazon';
-    if (lower.contains('chrome')) return 'Google Chrome';
-    if (lower.contains('safari')) return 'Safari';
-    if (lower.contains('youtube')) return 'YouTube';
-    if (lower.contains('telegram')) return 'Telegram';
-    if (lower.contains('reddit')) return 'Reddit';
-    if (lower.contains('linkedin')) return 'LinkedIn';
-    return null;
   }
 }
