@@ -6,6 +6,7 @@ import '../../models/category_model.dart';
 import '../../models/screenshot_model.dart';
 import '../../models/sync_queue_item_model.dart';
 import '../../models/tag_model.dart';
+import 'media_classifier.dart';
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -130,8 +131,10 @@ class DatabaseService {
       )
     ''');
 
-    // Seed default canonical Unsorted category
-    await db.insert('categories', CategoryModel.unsortedCategory.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    // Seed default canonical categories
+    for (final cat in CategoryModel.defaultCategories) {
+      await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    }
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -398,8 +401,25 @@ class DatabaseService {
       }
     }
 
-    // 3. Query all categories from SQLite
-    final maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    // 3. Ensure all default categories are seeded in SQLite
+    List<Map<String, dynamic>> maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    if (maps.length <= 1) {
+      for (final cat in CategoryModel.defaultCategories) {
+        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      await autoClassifyAndOrganizeScreenshots();
+      // Re-run count queries
+      final updatedIdCounts = await db.rawQuery('SELECT category_id, COUNT(*) as count FROM screenshots WHERE is_mock = 0 GROUP BY category_id');
+      for (final row in updatedIdCounts) {
+        final catId = row['category_id'] as String?;
+        final count = row['count'] as int? ?? 0;
+        if (catId != null && catId.isNotEmpty) {
+          idCounts[catId.toLowerCase()] = count;
+        }
+      }
+      maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+    }
+
     final categories = <CategoryModel>[];
     bool hasUnsorted = false;
 
@@ -515,12 +535,89 @@ class DatabaseService {
       }
     }
 
-    // 4. Normalize any screenshots with null, empty, or 'unsorted' category
-    await db.update(
+    // 4. Auto-classify all unsorted screenshots into appropriate Categories & Subcategories
+    await autoClassifyAndOrganizeScreenshots();
+  }
+
+  /// Automatically categorizes and organizes all unsorted screenshots into proper Category & Subcategory folders
+  Future<int> autoClassifyAndOrganizeScreenshots() async {
+    final db = await database;
+    const classifier = MediaClassifier();
+
+    // 1. Ensure all default categories exist in SQLite
+    var catRows = await db.query('categories');
+    if (catRows.length <= 1) {
+      for (final cat in CategoryModel.defaultCategories) {
+        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      catRows = await db.query('categories');
+    }
+
+    final catMap = <String, CategoryModel>{};
+    for (final r in catRows) {
+      final c = CategoryModel.fromMap(r);
+      catMap[c.name.toLowerCase()] = c;
+    }
+
+    // 2. Fetch all screenshots needing proper folder organization
+    final items = await db.query(
       'screenshots',
-      {'category_id': CategoryModel.unsortedId, 'category_name': CategoryModel.unsortedName},
-      where: '(category_id IS NULL OR category_id = \'\' OR category_id = \'unsorted\') AND is_mock = 0',
+      where: 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\' OR subcategory IS NULL OR subcategory = \'\')',
+      whereArgs: [CategoryModel.unsortedId, CategoryModel.unsortedName],
     );
+
+    int organized = 0;
+
+    for (final row in items) {
+      final id = row['id'] as String;
+      final fileName = row['file_name'] as String? ?? '';
+      final filePath = row['file_path'] as String? ?? '';
+      final sourceApp = row['source_app'] as String? ?? '';
+      final ocrText = row['ocr_text'] as String? ?? '';
+
+      final result = classifier.classifyMediaItem(
+        fileName: fileName,
+        filePath: filePath,
+        sourceApp: sourceApp,
+        ocrText: ocrText,
+      );
+
+      final targetCat = catMap[result.categoryName.toLowerCase()];
+      final targetCatId = targetCat?.id ?? CategoryModel.unsortedId;
+      final targetCatName = targetCat?.name ?? result.categoryName;
+
+      await db.update(
+        'screenshots',
+        {
+          'category_id': targetCatId,
+          'category_name': targetCatName,
+          'subcategory': result.subcategory,
+          'confidence': result.confidence,
+          'is_reviewed': result.confidence >= 0.85 ? 1 : 0,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+
+      // Add tags
+      for (final tagStr in result.tags) {
+        final tagId = tagStr.toLowerCase().replaceAll(' ', '_');
+        await db.insert(
+          'tags',
+          {'id': tagId, 'name': tagStr, 'color_hex': '6366F1'},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        await db.insert(
+          'screenshot_tags',
+          {'screenshot_id': id, 'tag_id': tagId},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+
+      organized++;
+    }
+
+    return organized;
   }
 
   // ==================== TAGS ====================

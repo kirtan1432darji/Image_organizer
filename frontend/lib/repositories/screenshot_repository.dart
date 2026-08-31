@@ -111,9 +111,13 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
       await _db.upsertScreenshot(s);
     }
 
-    // 2. Push metadata payload to ASP.NET Core backend in batch
+    // 2. Immediately organize all screenshots into Category & Subcategory folders on-device
+    await _db.autoClassifyAndOrganizeScreenshots();
+
+    // 3. Push metadata payload to ASP.NET Core backend in batch
     try {
       final batchPayload = screenshots.map((s) => {
+        'device_asset_id': s.deviceAssetId,
         'imageId': s.deviceAssetId,
         'imagePath': s.filePath,
         'capturedDate': s.createdAt.toIso8601String(),
@@ -122,6 +126,7 @@ class ScreenshotRepositoryImpl implements ScreenshotRepository {
         'height': s.height,
         'ocrText': s.ocrText ?? '',
         'autoClassify': true,
+        'auto_classify': true,
       }).toList();
 
       final res = await _apiClient.batchScanScreenshots(batchPayload);
