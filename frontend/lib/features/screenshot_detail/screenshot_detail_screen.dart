@@ -98,7 +98,7 @@ class _ScreenshotDetailScreenState
       builder: (ctx) => AlertDialog(
         title: const Text('Remove from App Library?'),
         content: const Text(
-          'This will remove the screenshot and its AI tags from this organizer. Note: Your original photo in your phone gallery will NOT be deleted.',
+          'This will remove the screenshot and its AI tags from ContextVault. Note: Your original photo in your phone gallery will NOT be deleted.',
         ),
         actions: [
           TextButton(

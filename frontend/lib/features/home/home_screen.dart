@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/color_constants.dart';
 import '../../core/widgets/empty_state_view.dart';
 import '../../core/widgets/error_state_view.dart';
@@ -85,7 +86,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(width: 10),
             const Text(
-              'AI Screenshot Organizer',
+              AppInfo.appName,
               style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
             ),
           ],

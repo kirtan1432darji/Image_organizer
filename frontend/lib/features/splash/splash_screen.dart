@@ -112,16 +112,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        'AI Screenshot',
+                        'ContextVault',
                         style: theme.textTheme.displaySmall?.copyWith(
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.5,
                         ),
                       ),
                       Text(
-                        'ORGANIZER',
+                        'SEARCHABLE KNOWLEDGE',
                         style: theme.textTheme.labelMedium?.copyWith(
-                          letterSpacing: 4,
+                          letterSpacing: 3,
                           fontWeight: FontWeight.w700,
                           color: ColorConstants.primary,
                         ),

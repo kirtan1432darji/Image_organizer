@@ -54,7 +54,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             const SizedBox(height: 24),
             _buildSection(
               '1. Non-Destructive Operation',
-              'AI Screenshot Organizer operates purely as a read-only metadata layer over your system gallery. It does not move, rename, delete, copy, or compress any image files on your phone storage.',
+              'ContextVault operates purely as a read-only metadata layer over your system gallery. It does not move, rename, delete, copy, or compress any image files on your phone storage.',
               context,
             ),
             _buildSection(

@@ -1,9 +1,19 @@
+class AppInfo {
+  AppInfo._();
+
+  static const String appName = 'ContextVault';
+  static const String tagline = 'Turn Screenshots into Searchable Knowledge';
+  static const String appVersion = '1.0.0';
+  static const String buildNumber = '1';
+}
+
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'AI Screenshot Organizer';
-  static const String appVersion = '1.0.0';
-  static const String buildNumber = '1';
+  static const String appName = AppInfo.appName;
+  static const String tagline = AppInfo.tagline;
+  static const String appVersion = AppInfo.appVersion;
+  static const String buildNumber = AppInfo.buildNumber;
 
   // Shared Preferences Keys
   static const String keyIsFirstLaunch = 'is_first_launch';
@@ -15,7 +25,7 @@ class AppConstants {
   static const String keyLastScanTimestamp = 'last_scan_timestamp';
   static const String keyRecentSearches = 'recent_search_queries';
 
-  // Database
+  // Database (preserves internal database name for compatibility)
   static const String databaseName = 'ai_screenshot_organizer.db';
   static const int databaseVersion = 1;
 
