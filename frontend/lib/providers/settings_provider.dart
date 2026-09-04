@@ -10,31 +10,43 @@ final settingsRepositoryProvider = Provider<SettingsRepository>((ref) {
 class SettingsState {
   final ThemeMode themeMode;
   final bool autoScan;
+  final bool autoDetectScreenshots;
+  final bool notificationsEnabled;
   final bool scanOnlyScreenshots;
   final String backendUrl;
   final bool isFirstLaunch;
+  final DateTime? lastScanTime;
 
   const SettingsState({
     this.themeMode = ThemeMode.system,
     this.autoScan = true,
+    this.autoDetectScreenshots = true,
+    this.notificationsEnabled = true,
     this.scanOnlyScreenshots = true,
     this.backendUrl = ApiConstants.defaultBaseUrl,
     this.isFirstLaunch = false,
+    this.lastScanTime,
   });
 
   SettingsState copyWith({
     ThemeMode? themeMode,
     bool? autoScan,
+    bool? autoDetectScreenshots,
+    bool? notificationsEnabled,
     bool? scanOnlyScreenshots,
     String? backendUrl,
     bool? isFirstLaunch,
+    DateTime? lastScanTime,
   }) {
     return SettingsState(
       themeMode: themeMode ?? this.themeMode,
       autoScan: autoScan ?? this.autoScan,
+      autoDetectScreenshots: autoDetectScreenshots ?? this.autoDetectScreenshots,
+      notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
       scanOnlyScreenshots: scanOnlyScreenshots ?? this.scanOnlyScreenshots,
       backendUrl: backendUrl ?? this.backendUrl,
       isFirstLaunch: isFirstLaunch ?? this.isFirstLaunch,
+      lastScanTime: lastScanTime ?? this.lastScanTime,
     );
   }
 }
@@ -49,6 +61,9 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   Future<void> _loadSettings() async {
     final theme = await _repo.getThemeMode();
     final auto = await _repo.getAutoScan();
+    final autoDetect = await _repo.getAutoDetectScreenshots();
+    final notify = await _repo.getScreenshotNotifications();
+    final lastTime = await _repo.getLastScanTime();
     final onlyScreenshots = await _repo.getScanOnlyScreenshots();
     final url = await _repo.getBackendUrl();
     final isFirst = await _repo.isFirstLaunch();
@@ -56,6 +71,9 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
     state = SettingsState(
       themeMode: theme,
       autoScan: auto,
+      autoDetectScreenshots: autoDetect,
+      notificationsEnabled: notify,
+      lastScanTime: lastTime,
       scanOnlyScreenshots: onlyScreenshots,
       backendUrl: url,
       isFirstLaunch: isFirst,
@@ -70,6 +88,21 @@ class SettingsNotifier extends StateNotifier<SettingsState> {
   Future<void> setAutoScan(bool enabled) async {
     await _repo.setAutoScan(enabled);
     state = state.copyWith(autoScan: enabled);
+  }
+
+  Future<void> setAutoDetectScreenshots(bool enabled) async {
+    await _repo.setAutoDetectScreenshots(enabled);
+    state = state.copyWith(autoDetectScreenshots: enabled);
+  }
+
+  Future<void> setScreenshotNotifications(bool enabled) async {
+    await _repo.setScreenshotNotifications(enabled);
+    state = state.copyWith(notificationsEnabled: enabled);
+  }
+
+  Future<void> setLastScanTime(DateTime time) async {
+    await _repo.setLastScanTime(time);
+    state = state.copyWith(lastScanTime: time);
   }
 
   Future<void> setScanOnlyScreenshots(bool only) async {

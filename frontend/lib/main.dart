@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/services/auth_service.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
+import 'providers/screenshot_listener_provider.dart';
 import 'providers/settings_provider.dart';
 import 'routes/app_router.dart';
 
@@ -39,6 +40,8 @@ class ContextVaultApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
+    // Initialize automatic screenshot background detection listener
+    ref.watch(screenshotListenerProvider);
 
     return MaterialApp.router(
       title: AppInfo.appName,

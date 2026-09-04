@@ -19,6 +19,8 @@ class AppConstants {
   static const String keyIsFirstLaunch = 'is_first_launch';
   static const String keyThemeMode = 'app_theme_mode';
   static const String keyAutoScanOnLaunch = 'auto_scan_on_launch';
+  static const String keyAutoDetectScreenshots = 'auto_detect_screenshots';
+  static const String keyScreenshotNotifications = 'screenshot_notifications';
   static const String keyScanOnlyScreenshots = 'scan_only_screenshots';
   static const String keyBackendUrl = 'backend_api_url';
   static const String keyUseMockAi = 'use_mock_ai';

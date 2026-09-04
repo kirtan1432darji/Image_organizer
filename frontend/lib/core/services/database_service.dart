@@ -211,6 +211,43 @@ class DatabaseService {
     return ScreenshotModel.fromMap(maps.first, tags);
   }
 
+  Future<ScreenshotModel?> getScreenshotByFilePath(String filePath) async {
+    if (filePath.isEmpty) return null;
+    final db = await database;
+    final maps = await db.query(
+      'screenshots',
+      where: 'file_path = ?',
+      whereArgs: [filePath],
+      limit: 1,
+    );
+
+    if (maps.isEmpty) return null;
+    final tags = await getTagsForScreenshot(maps.first['id'] as String);
+    return ScreenshotModel.fromMap(maps.first, tags);
+  }
+
+  /// Checks if a screenshot already exists by either device asset ID or file path
+  Future<bool> hasScreenshot({String? deviceAssetId, String? filePath}) async {
+    final db = await database;
+    if (deviceAssetId != null && deviceAssetId.isNotEmpty) {
+      final res = await db.rawQuery(
+        'SELECT 1 FROM screenshots WHERE device_asset_id = ? LIMIT 1',
+        [deviceAssetId],
+      );
+      if (res.isNotEmpty) return true;
+    }
+
+    if (filePath != null && filePath.isNotEmpty) {
+      final res = await db.rawQuery(
+        'SELECT 1 FROM screenshots WHERE file_path = ? LIMIT 1',
+        [filePath],
+      );
+      if (res.isNotEmpty) return true;
+    }
+
+    return false;
+  }
+
   Future<void> upsertScreenshot(ScreenshotModel screenshot) async {
     final existing = await getScreenshotByDeviceAssetId(screenshot.deviceAssetId);
     
@@ -286,6 +323,15 @@ class DatabaseService {
         conflictAlgorithm: ConflictAlgorithm.ignore,
       );
     }
+  }
+
+  Future<void> linkScreenshotTag(String screenshotId, String tagId) async {
+    final db = await database;
+    await db.insert(
+      'screenshot_tags',
+      {'screenshot_id': screenshotId, 'tag_id': tagId},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
   }
 
   Future<void> toggleFavorite(String id, bool isFavorite) async {

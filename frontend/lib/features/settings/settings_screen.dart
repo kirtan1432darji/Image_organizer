@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/color_constants.dart';
+import '../../core/utils/date_formatter.dart';
 import '../../core/widgets/modern_card.dart';
+import '../../providers/screenshot_listener_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/sync_provider.dart';
 import '../../routes/route_names.dart';
@@ -91,12 +93,13 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
+    final listenerState = ref.watch(screenshotListenerProvider);
     final pendingCountAsync = ref.watch(pendingSyncCountProvider);
     final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: const Text('ContextVault Settings'),
       ),
       body: ListView(
         physics: const BouncingScrollPhysics(),
@@ -163,6 +166,97 @@ class SettingsScreen extends ConsumerWidget {
                   onChanged: (val) {
                     ref.read(settingsProvider.notifier).setScanOnlyScreenshots(val);
                   },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // Automatic Background Detection Section
+          _buildSectionHeader('Automatic Screenshot Detection', context),
+          ModernCard(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: const Icon(Icons.radar_rounded, color: ColorConstants.primary),
+                  title: const Text('Auto Detect Screenshots'),
+                  subtitle: const Text('Real-time MediaStore ContentObserver detection'),
+                  value: listenerState.autoDetectEnabled,
+                  onChanged: (val) {
+                    ref.read(screenshotListenerProvider.notifier).toggleAutoDetect(val);
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: Icon(
+                    listenerState.isMonitoring
+                        ? Icons.check_circle_outline_rounded
+                        : Icons.pause_circle_outline_rounded,
+                    color: listenerState.isMonitoring
+                        ? ColorConstants.success
+                        : ColorConstants.warning,
+                  ),
+                  title: const Text('Background Monitoring Status'),
+                  subtitle: Text(listenerState.statusMessage),
+                  trailing: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: (listenerState.isMonitoring
+                              ? ColorConstants.success
+                              : ColorConstants.warning)
+                          .withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      listenerState.isMonitoring ? 'Active' : 'Paused',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: listenerState.isMonitoring
+                            ? ColorConstants.success
+                            : ColorConstants.warning,
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  secondary: const Icon(Icons.notifications_active_outlined),
+                  title: const Text('Notification on Detection'),
+                  subtitle: const Text('Show alert when screenshot is sorted into folder'),
+                  value: listenerState.notificationsEnabled,
+                  onChanged: (val) {
+                    ref.read(screenshotListenerProvider.notifier).toggleNotifications(val);
+                  },
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.history_toggle_off_rounded),
+                  title: const Text('Last Screenshot Scan Time'),
+                  subtitle: Text(
+                    listenerState.lastScanTime != null
+                        ? DateFormatter.formatFull(listenerState.lastScanTime!)
+                        : 'No recent scans',
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.document_scanner_outlined, color: ColorConstants.primary),
+                  title: const Text('Scan Existing Screenshots'),
+                  subtitle: const Text('Run scanner across device gallery now'),
+                  trailing: ElevatedButton(
+                    onPressed: () async {
+                      await ref.read(screenshotListenerProvider.notifier).triggerManualScan();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Gallery scan complete.')),
+                        );
+                      }
+                    },
+                    child: const Text('Scan Now'),
+                  ),
                 ),
               ],
             ),

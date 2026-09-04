@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/color_constants.dart';
 import '../../providers/settings_provider.dart';
 import '../../routes/route_names.dart';
@@ -112,16 +113,17 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        'ContextVault',
+                        AppInfo.appName,
                         style: theme.textTheme.displaySmall?.copyWith(
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.5,
                         ),
                       ),
                       Text(
-                        'SEARCHABLE KNOWLEDGE',
+                        AppInfo.tagline.toUpperCase(),
+                        textAlign: TextAlign.center,
                         style: theme.textTheme.labelMedium?.copyWith(
-                          letterSpacing: 3,
+                          letterSpacing: 2.0,
                           fontWeight: FontWeight.w700,
                           color: ColorConstants.primary,
                         ),

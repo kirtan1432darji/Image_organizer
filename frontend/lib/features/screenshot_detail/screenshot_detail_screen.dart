@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/color_constants.dart';
 import '../../core/widgets/confidence_badge.dart';
 import '../../core/widgets/modern_card.dart';
@@ -98,7 +99,7 @@ class _ScreenshotDetailScreenState
       builder: (ctx) => AlertDialog(
         title: const Text('Remove from App Library?'),
         content: const Text(
-          'This will remove the screenshot and its AI tags from ContextVault. Note: Your original photo in your phone gallery will NOT be deleted.',
+          'This will remove the screenshot and its AI tags from ${AppInfo.appName}. Note: Your original photo in your phone gallery will NOT be deleted.',
         ),
         actions: [
           TextButton(

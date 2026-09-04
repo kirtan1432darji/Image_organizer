@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/constants/color_constants.dart';
 import '../../providers/scanner_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -65,7 +66,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                   ),
                   const SizedBox(width: 12),
                   Text(
-                    'ContextVault',
+                    AppInfo.appName,
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                       color: ColorConstants.primary,
@@ -75,7 +76,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
               const SizedBox(height: 24),
               Text(
-                'Turn Screenshots into Searchable Knowledge.',
+                '${AppInfo.tagline}.',
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.w800,
                   height: 1.2,

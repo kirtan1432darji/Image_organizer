@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/color_constants.dart';
 
 class PrivacyPolicyScreen extends StatelessWidget {
@@ -10,7 +11,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Privacy & Security'),
+        title: const Text('ContextVault Privacy Policy'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -54,7 +55,7 @@ class PrivacyPolicyScreen extends StatelessWidget {
             const SizedBox(height: 24),
             _buildSection(
               '1. Non-Destructive Operation',
-              'ContextVault operates purely as a read-only metadata layer over your system gallery. It does not move, rename, delete, copy, or compress any image files on your phone storage.',
+              '${AppInfo.appName} operates purely as a read-only metadata layer over your system gallery. It does not move, rename, delete, copy, or compress any image files on your phone storage.',
               context,
             ),
             _buildSection(
