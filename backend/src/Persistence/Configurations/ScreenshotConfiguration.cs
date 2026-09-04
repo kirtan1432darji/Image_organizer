@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AI.ScreenshotOrganizer.Domain.Entities;
 
@@ -18,6 +18,10 @@ public class ScreenshotConfiguration : IEntityTypeConfiguration<Screenshot>
         builder.Property(s => s.FileName).HasMaxLength(256);
         builder.Property(s => s.ContentUri).HasMaxLength(1024);
         builder.Property(s => s.SourceApp).HasMaxLength(100);
+        builder.Property(s => s.DetectedApp).HasMaxLength(100);
+        builder.Property(s => s.KeywordsJson).IsUnicode(true);
+        builder.Property(s => s.IsAutoCategorized).HasDefaultValue(false);
+        builder.Ignore(s => s.ClassificationConfidence);
         builder.Property(s => s.OCRStatus).HasMaxLength(30);
         builder.Property(s => s.OCRText).IsUnicode(true);
         builder.Property(s => s.VisionDescription).IsUnicode(true);

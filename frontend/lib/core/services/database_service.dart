@@ -33,7 +33,7 @@ class DatabaseService {
       onUpgrade: _onUpgrade,
     );
 
-    // Schema migration check: ensure parent_id exists on categories table
+    // Schema migration check: ensure parent_id, classification columns, and history exist
     try {
       final info = await db.rawQuery('PRAGMA table_info(categories)');
       final hasParentId = info.any((col) => col['name'] == 'parent_id');
@@ -41,6 +41,34 @@ class DatabaseService {
         await db.execute('ALTER TABLE categories ADD COLUMN parent_id TEXT');
       }
       await db.execute('CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)');
+
+      final ssInfo = await db.rawQuery('PRAGMA table_info(screenshots)');
+      final hasDetectedApp = ssInfo.any((col) => col['name'] == 'detected_app');
+      if (!hasDetectedApp) {
+        await db.execute('ALTER TABLE screenshots ADD COLUMN detected_app TEXT');
+      }
+      final hasKeywordsJson = ssInfo.any((col) => col['name'] == 'keywords_json');
+      if (!hasKeywordsJson) {
+        await db.execute('ALTER TABLE screenshots ADD COLUMN keywords_json TEXT');
+      }
+      final hasIsAutoCat = ssInfo.any((col) => col['name'] == 'is_auto_categorized');
+      if (!hasIsAutoCat) {
+        await db.execute('ALTER TABLE screenshots ADD COLUMN is_auto_categorized INTEGER DEFAULT 0');
+      }
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS classification_history (
+          id TEXT PRIMARY KEY,
+          screenshot_id TEXT NOT NULL,
+          category TEXT NOT NULL,
+          sub_category TEXT,
+          tags_json TEXT,
+          confidence REAL NOT NULL DEFAULT 0.0,
+          model_name TEXT,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (screenshot_id) REFERENCES screenshots (id) ON DELETE CASCADE
+        )
+      ''');
     } catch (_) {}
 
     return db;
@@ -98,6 +126,9 @@ class DatabaseService {
         subcategory TEXT,
         confidence REAL NOT NULL DEFAULT 0.0,
         source_app TEXT,
+        detected_app TEXT,
+        keywords_json TEXT,
+        is_auto_categorized INTEGER NOT NULL DEFAULT 0,
         is_favorite INTEGER NOT NULL DEFAULT 0,
         is_reviewed INTEGER NOT NULL DEFAULT 0,
         is_synced INTEGER NOT NULL DEFAULT 0,
@@ -892,5 +923,39 @@ class DatabaseService {
     final db = await database;
     await db.delete('ocr_cache');
     await db.update('screenshots', {'ocr_status': 'none', 'ocr_text': null});
+  }
+
+  // ==================== CLASSIFICATION HISTORY ====================
+
+  Future<void> saveClassificationHistory({
+    required String screenshotId,
+    required String category,
+    String? subCategory,
+    List<String> tags = const [],
+    double confidence = 0.0,
+    String modelName = 'contextvault-local-engine',
+  }) async {
+    final db = await database;
+    const uuid = Uuid();
+    await db.insert('classification_history', {
+      'id': 'hist_${uuid.v4()}',
+      'screenshot_id': screenshotId,
+      'category': category,
+      'sub_category': subCategory,
+      'tags_json': tags.join(','),
+      'confidence': confidence,
+      'model_name': modelName,
+      'created_at': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Map<String, dynamic>>> getClassificationHistory(String screenshotId) async {
+    final db = await database;
+    return await db.query(
+      'classification_history',
+      where: 'screenshot_id = ?',
+      whereArgs: [screenshotId],
+      orderBy: 'created_at DESC',
+    );
   }
 }

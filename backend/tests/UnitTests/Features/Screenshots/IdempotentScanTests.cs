@@ -1,4 +1,4 @@
-﻿using AutoMapper;
+using AutoMapper;
 using FluentAssertions;
 using Moq;
 using Xunit;
@@ -90,8 +90,8 @@ public class IdempotentScanTests
     {
         var items = new List<ScanScreenshotRequestDto>
         {
-            new() { DeviceAssetId = "asset_1", FileName = "1.png", ImagePath = "/1.png" },
-            new() { DeviceAssetId = "asset_2", FileName = "2.png", ImagePath = "/2.png" }
+            new() { DeviceAssetId = "asset_1", FileName = "1.png", ImagePath = "/1.png", AutoClassify = false },
+            new() { DeviceAssetId = "asset_2", FileName = "2.png", ImagePath = "/2.png", AutoClassify = false }
         };
 
         _screenshotRepoMock.Setup(r => r.GetByDeviceAssetIdAsync(It.IsAny<string>(), _userId, It.IsAny<CancellationToken>()))

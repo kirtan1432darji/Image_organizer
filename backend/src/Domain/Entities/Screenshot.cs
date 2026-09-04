@@ -29,6 +29,10 @@ public class Screenshot : BaseEntity
     public Category? SubCategory { get; set; }
 
     public double Confidence { get; set; }
+    public double ClassificationConfidence { get => Confidence; set => Confidence = value; }
+    public string? DetectedApp { get; set; }
+    public string KeywordsJson { get; set; } = "[]";
+    public bool IsAutoCategorized { get; set; } = false;
     public string Hash { get; set; } = string.Empty;
     public bool IsFavorite { get; set; } = false;
     public bool IsReviewed { get; set; } = false;

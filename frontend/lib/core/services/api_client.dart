@@ -314,6 +314,86 @@ class ApiClient {
     }
   }
 
+  /// Sprint 1.3: Classify screenshot with full metadata and folder hierarchy resolution
+  Future<Result<ClassificationResultModel>> classifyScreenshotMetadata({
+    String? screenshotId,
+    String? fileName,
+    String? filePath,
+    required String ocrText,
+    String? visionDescription,
+    String? sourceApp,
+    String? existingCategory,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.classificationClassify,
+        data: {
+          'screenshot_id': screenshotId,
+          'file_name': fileName,
+          'file_path': filePath,
+          'ocr_text': ocrText,
+          'vision_description': visionDescription,
+          'source_app': sourceApp,
+          'existing_category': existingCategory,
+        },
+      );
+
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(ClassificationResultModel.fromJson(unwrapped));
+      }
+      return Result.failure('Invalid classification response');
+    } on DioException catch (e) {
+      return _handleDioError<ClassificationResultModel>(e);
+    } catch (e) {
+      return Result.failure('Classification error: $e');
+    }
+  }
+
+  /// Sprint 1.3: Reclassify an existing screenshot
+  Future<Result<ClassificationResultModel>> reclassifyScreenshot({
+    required String screenshotId,
+    bool forceReclassify = true,
+    String? userHint,
+  }) async {
+    try {
+      final response = await _dio.post(
+        ApiConstants.classificationReclassify,
+        data: {
+          'screenshot_id': screenshotId,
+          'force_reclassify': forceReclassify,
+          'user_hint': userHint,
+        },
+      );
+
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(ClassificationResultModel.fromJson(unwrapped));
+      }
+      return Result.failure('Invalid reclassification response');
+    } on DioException catch (e) {
+      return _handleDioError<ClassificationResultModel>(e);
+    } catch (e) {
+      return Result.failure('Reclassification error: $e');
+    }
+  }
+
+  /// Sprint 1.3: Fetch classification history for a screenshot
+  Future<Result<List<Map<String, dynamic>>>> fetchClassificationHistory(String screenshotId) async {
+    try {
+      final response = await _dio.get('${ApiConstants.classificationHistory}/$screenshotId');
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is List) {
+        return Result.success(unwrapped.map((e) => Map<String, dynamic>.from(e as Map)).toList());
+      }
+      return Result.success([]);
+    } on DioException catch (e) {
+      return _handleDioError<List<Map<String, dynamic>>>(e);
+    } catch (e) {
+      return Result.failure('History error: $e');
+    }
+  }
+
   /// Fetch paged screenshots from ASP.NET Core backend
   Future<Result<List<Map<String, dynamic>>>> fetchScreenshots({
     String? categoryId,

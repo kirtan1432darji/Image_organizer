@@ -23,6 +23,11 @@ class ApiConstants {
   static const String classifyScreenshot = '/screenshots/classify';
   static const String batchClassify = '/screenshots/batch-classify';
 
+  // Sprint 1.3 AI Classification Engine Endpoints
+  static const String classificationClassify = '/classification/classify';
+  static const String classificationReclassify = '/classification/reclassify';
+  static const String classificationHistory = '/classification/history';
+
   // Category & Tag Endpoints
   static const String categories = '/categories';
   static const String tags = '/tags';

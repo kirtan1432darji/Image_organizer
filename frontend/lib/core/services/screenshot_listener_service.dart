@@ -11,7 +11,9 @@ import 'media_classifier.dart';
 import 'media_observer_service.dart';
 import 'notification_service.dart';
 import 'ocr_service.dart';
+import 'smart_folder_service.dart';
 import 'sync_service.dart';
+import '../../repositories/classification_repository.dart';
 
 /// Service that coordinates automatic background screenshot detection,
 /// duplicate prevention, OCR extraction, AI classification, smart folder sorting,
@@ -24,6 +26,7 @@ class ScreenshotListenerService {
   final MediaClassifier _classifier;
   final NotificationService _notificationService;
   final SyncService _syncService;
+  final SmartFolderService _smartFolderService;
 
   final Set<String> _processedAssetIds = <String>{};
   final Set<String> _processedHashes = <String>{};
@@ -42,15 +45,26 @@ class ScreenshotListenerService {
     MediaClassifier classifier = const MediaClassifier(),
     NotificationService? notificationService,
     SyncService? syncService,
+    SmartFolderService? smartFolderService,
   })  : _mediaObserver = mediaObserver ?? MediaObserverService(classifier: classifier),
         _db = db ?? DatabaseService(),
         _ocrService = ocrService ?? LocalOcrService(),
         _apiClient = apiClient ?? ApiClient(),
         _classifier = classifier,
         _notificationService = notificationService ?? NotificationService(),
-        _syncService = syncService ?? SyncService();
+        _syncService = syncService ?? SyncService(),
+        _smartFolderService = smartFolderService ??
+            SmartFolderService(
+              classificationRepository: ClassificationRepository(
+                apiClient: apiClient ?? ApiClient(),
+                databaseService: db ?? DatabaseService(),
+                mediaClassifier: classifier,
+              ),
+              databaseService: db ?? DatabaseService(),
+            );
 
   bool get isListening => _isListening;
+  ApiClient get apiClient => _apiClient;
 
   /// Starts the automatic background detection pipeline
   Future<void> start() async {
@@ -152,114 +166,36 @@ class ScreenshotListenerService {
         debugPrint('[ScreenshotListenerService] OCR error: $e');
       }
 
-      // 4. AI Classification & Backend Sync Trigger
+      // 4. Sprint 1.3: AI Classification Engine via SmartFolderService
       String targetCatId = CategoryModel.unsortedId;
       String targetCatName = CategoryModel.unsortedName;
       String subcategory = 'General';
       double confidence = ocrConfidence;
       final tags = <TagModel>[];
-
-      // 4a. Send OCR text and screenshot metadata to existing .NET API (POST /api/screenshots/scan)
       bool remoteSuccess = false;
-      try {
-        final scanRes = await _apiClient.scanScreenshotMetadata(
-          imageId: assetId,
-          imagePath: filePath,
-          fileName: item.fileName,
-          fileSize: item.fileSize,
-          capturedDate: item.createdAt,
-          sourceApp: initialModel.sourceApp ?? 'Screenshot',
-          width: initialModel.width,
-          height: initialModel.height,
-          ocrText: extractedText,
-          hash: fileHash,
-          autoClassify: true,
-        );
 
-        if (scanRes.isSuccess) {
-          final data = scanRes.dataOrNull;
-          if (data != null) {
-            if (data['category_name'] != null || data['categoryName'] != null) {
-              targetCatName = (data['category_name'] ?? data['categoryName']).toString();
-            }
-            if (data['category_id'] != null || data['categoryId'] != null) {
-              targetCatId = (data['category_id'] ?? data['categoryId']).toString();
-            }
-            if (data['sub_category_name'] != null || data['subCategoryName'] != null) {
-              subcategory = (data['sub_category_name'] ?? data['subCategoryName']).toString();
-            }
-            final remoteTags = (data['tags'] as List?)?.map((e) => e.toString()).toList();
-            if (remoteTags != null) {
-              for (final tagStr in remoteTags) {
-                tags.add(TagModel(
-                  id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
-                  name: tagStr,
-                  colorHex: '6366F1',
-                ));
-              }
-            }
-          }
-          remoteSuccess = true;
-        }
-      } catch (e) {
-        debugPrint('[ScreenshotListenerService] Remote scan upload error: $e');
-      }
+      final classResult = await _smartFolderService.classifyAndOrganizeScreenshot(
+        filePath: filePath,
+        ocrText: extractedText,
+        screenshotId: screenshotId,
+        fileName: item.fileName,
+        sourceApp: initialModel.sourceApp,
+      );
 
-      // 4b. Fallback to /screenshots/classify if scan was unauthenticated/failed
-      if (!remoteSuccess) {
-        try {
-          final remoteRes = await _apiClient.classifyScreenshot(
-            screenshotId: screenshotId,
-            fileName: item.fileName,
-            ocrText: extractedText,
-            sourceApp: initialModel.sourceApp ?? '',
-          );
+      if (classResult != null) {
+        targetCatId = classResult.categoryId;
+        targetCatName = classResult.categoryName;
+        subcategory = classResult.subcategory;
+        confidence = classResult.confidence;
+        remoteSuccess = classResult.isAutoCategorized;
 
-          if (remoteRes.isSuccess) {
-            final data = remoteRes.dataOrNull!;
-            targetCatId = data.categoryId;
-            targetCatName = data.categoryName;
-            subcategory = data.subcategory;
-            confidence = data.confidence;
-
-            for (final tagStr in data.suggestedTags) {
-              tags.add(TagModel(
-                id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
-                name: tagStr,
-                colorHex: '6366F1',
-              ));
-            }
-            remoteSuccess = true;
-          }
-        } catch (e) {
-          debugPrint('[ScreenshotListenerService] Remote AI classification unavailable: $e');
-        }
-      }
-
-      // 4c. Fallback to on-device semantic keyword classification & dynamic Smart Folders
-      if (!remoteSuccess) {
-        final localClass = _classifier.classifyMediaItem(
-          fileName: item.fileName,
-          filePath: filePath,
-          sourceApp: initialModel.sourceApp ?? '',
-          ocrText: extractedText,
-        );
-
-        subcategory = localClass.subcategory;
-        confidence = localClass.confidence;
-
-        for (final tagStr in localClass.tags) {
+        for (final tagStr in classResult.suggestedTags) {
           tags.add(TagModel(
             id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
             name: tagStr,
             colorHex: '6366F1',
           ));
         }
-
-        // Dynamically resolve or create the folder hierarchy in SQLite
-        final targetCat = await _db.getOrCreateFolderHierarchy(localClass.folderPath);
-        targetCatId = targetCat.id;
-        targetCatName = targetCat.name;
       }
 
       // 5. Smart Folder & Category Update

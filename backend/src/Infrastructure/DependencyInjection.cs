@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -20,6 +20,7 @@ public static class DependencyInjection
         services.AddTransient<IJwtTokenGenerator, JwtTokenGenerator>();
         services.AddScoped<ICurrentUserService, CurrentUserService>();
         services.AddScoped<IAIClassificationService, MockAIClassificationService>();
+        services.AddScoped<IClassificationService, ClassificationService>();
 
         var jwtSecret = configuration["JwtSettings:Secret"] ?? "SuperSecretKeyForScreenshotOrganizerApp2026_Minimum32CharsLong!";
         var jwtIssuer = configuration["JwtSettings:Issuer"] ?? "AI.ScreenshotOrganizer";

@@ -62,6 +62,31 @@ BEGIN
 END
 GO
 
+-- Screenshots: Ensure Sprint 1.3 AI classification columns exist
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Screenshots]') AND name = N'ClassificationConfidence')
+BEGIN
+    ALTER TABLE [dbo].[Screenshots] ADD [ClassificationConfidence] float NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Screenshots]') AND name = N'DetectedApp')
+BEGIN
+    ALTER TABLE [dbo].[Screenshots] ADD [DetectedApp] nvarchar(100) NULL;
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Screenshots]') AND name = N'KeywordsJson')
+BEGIN
+    ALTER TABLE [dbo].[Screenshots] ADD [KeywordsJson] nvarchar(max) NULL CONSTRAINT DF_Screenshots_KeywordsJson DEFAULT N'[]';
+END
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Screenshots]') AND name = N'IsAutoCategorized')
+BEGIN
+    ALTER TABLE [dbo].[Screenshots] ADD [IsAutoCategorized] bit NOT NULL CONSTRAINT DF_Screenshots_IsAutoCategorized DEFAULT 0;
+END
+GO
+
 -- Tags: Ensure audit columns & RowVersion exist
 IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID(N'[dbo].[Tags]') AND name = N'CreatedOn')
 BEGIN
