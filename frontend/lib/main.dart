@@ -28,20 +28,20 @@ void main() async {
 
   runApp(
     const ProviderScope(
-      child: AiScreenshotOrganizerApp(),
+      child: ContextVaultApp(),
     ),
   );
 }
 
-class AiScreenshotOrganizerApp extends ConsumerWidget {
-  const AiScreenshotOrganizerApp({super.key});
+class ContextVaultApp extends ConsumerWidget {
+  const ContextVaultApp({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
 
     return MaterialApp.router(
-      title: AppConstants.appName,
+      title: AppInfo.appName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
@@ -50,3 +50,6 @@ class AiScreenshotOrganizerApp extends ConsumerWidget {
     );
   }
 }
+
+/// Backward compatibility alias for tests and existing references
+typedef AiScreenshotOrganizerApp = ContextVaultApp;

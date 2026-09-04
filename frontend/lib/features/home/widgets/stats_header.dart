@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/constants/app_constants.dart';
 import '../../../core/constants/color_constants.dart';
 import '../../../core/widgets/animated_counter.dart';
 import '../../../core/widgets/modern_card.dart';
@@ -39,7 +40,7 @@ class StatsHeader extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'AI Screenshot Organizer',
+                        AppInfo.appName,
                         style: theme.textTheme.labelMedium?.copyWith(
                           color: Colors.white70,
                           fontWeight: FontWeight.w600,

@@ -14,10 +14,10 @@ void main() {
   testWidgets('App initializes successfully smoke test', (WidgetTester tester) async {
     await tester.pumpWidget(
       const ProviderScope(
-        child: AiScreenshotOrganizerApp(),
+        child: ContextVaultApp(),
       ),
     );
     await tester.pump(const Duration(milliseconds: 500));
-    expect(find.byType(AiScreenshotOrganizerApp), findsOneWidget);
+    expect(find.byType(ContextVaultApp), findsOneWidget);
   });
 }

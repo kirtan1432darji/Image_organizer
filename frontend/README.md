@@ -1,4 +1,6 @@
-# 📱 AI Screenshot Organizer - Flutter Mobile App
+# 📱 ContextVault - Flutter Mobile App
+
+**Tagline**: *Turn Screenshots into Searchable Knowledge*
 
 A production-ready Flutter mobile application that creates an intelligent organizational layer over screenshots stored on the user's phone.
 
