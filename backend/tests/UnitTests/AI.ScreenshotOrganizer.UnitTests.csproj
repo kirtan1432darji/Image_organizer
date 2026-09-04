@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\Application\AI.ScreenshotOrganizer.Application.csproj" />
     <ProjectReference Include="..\..\src\Infrastructure\AI.ScreenshotOrganizer.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Domain\AI.ScreenshotOrganizer.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Persistence\AI.ScreenshotOrganizer.Persistence.csproj" />
     <ProjectReference Include="..\..\src\Shared\AI.ScreenshotOrganizer.Shared.csproj" />
   </ItemGroup>
 

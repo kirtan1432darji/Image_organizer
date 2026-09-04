@@ -1,4 +1,4 @@
-﻿using AI.ScreenshotOrganizer.Domain.Common;
+using AI.ScreenshotOrganizer.Domain.Common;
 
 namespace AI.ScreenshotOrganizer.Domain.Entities;
 
@@ -40,4 +40,12 @@ public class Screenshot : BaseEntity
     public ICollection<ScreenshotTag> ScreenshotTags { get; set; } = new List<ScreenshotTag>();
     public OCRCache? OCRCache { get; set; }
     public ICollection<ClassificationHistory> ClassificationHistories { get; set; } = new List<ClassificationHistory>();
+
+    // ContextVault AI Workspace Relations
+    public ICollection<ScreenshotEntity> ExtractedEntities { get; set; } = new List<ScreenshotEntity>();
+    public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
+    public ICollection<ChatHistory> ChatHistories { get; set; } = new List<ChatHistory>();
+    public ICollection<SearchHistory> SearchClicks { get; set; } = new List<SearchHistory>();
+    public ICollection<CollectionScreenshot> CollectionScreenshots { get; set; } = new List<CollectionScreenshot>();
+    public ICollection<EmbeddingCache> EmbeddingCaches { get; set; } = new List<EmbeddingCache>();
 }
