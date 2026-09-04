@@ -13,12 +13,12 @@ class CategoryNotifier extends AsyncNotifier<List<CategoryModel>> {
   @override
   Future<List<CategoryModel>> build() async {
     final repo = ref.read(categoryRepositoryProvider);
-    return repo.getCategories();
+    return repo.getRootCategories();
   }
 
   Future<List<CategoryModel>> _fetchCategories() async {
     final repo = ref.read(categoryRepositoryProvider);
-    return repo.getCategories();
+    return repo.getRootCategories();
   }
 
   Future<void> refresh() async {
@@ -35,6 +35,23 @@ class CategoryNotifier extends AsyncNotifier<List<CategoryModel>> {
 final categoryListProvider =
     AsyncNotifierProvider<CategoryNotifier, List<CategoryModel>>(() {
   return CategoryNotifier();
+});
+
+final rootCategoriesProvider = FutureProvider<List<CategoryModel>>((ref) async {
+  final repo = ref.watch(categoryRepositoryProvider);
+  return repo.getRootCategories();
+});
+
+final subcategoriesProvider =
+    FutureProvider.family<List<CategoryModel>, String>((ref, parentId) async {
+  final repo = ref.watch(categoryRepositoryProvider);
+  return repo.getSubcategories(parentId);
+});
+
+final categoryAncestorsProvider =
+    FutureProvider.family<List<CategoryModel>, String>((ref, categoryId) async {
+  final repo = ref.watch(categoryRepositoryProvider);
+  return repo.getCategoryAncestors(categoryId);
 });
 
 final allTagsProvider = FutureProvider<List<TagModel>>((ref) async {

@@ -6,6 +6,9 @@ import '../models/tag_model.dart';
 
 abstract class CategoryRepository {
   Future<List<CategoryModel>> getCategories();
+  Future<List<CategoryModel>> getRootCategories();
+  Future<List<CategoryModel>> getSubcategories(String parentId);
+  Future<List<CategoryModel>> getCategoryAncestors(String categoryId);
   Future<List<TagModel>> getAllTags();
   Future<void> syncRemoteCategories();
 }
@@ -23,6 +26,21 @@ class CategoryRepositoryImpl implements CategoryRepository {
   @override
   Future<List<CategoryModel>> getCategories() {
     return _db.getCategories();
+  }
+
+  @override
+  Future<List<CategoryModel>> getRootCategories() {
+    return _db.getRootCategories();
+  }
+
+  @override
+  Future<List<CategoryModel>> getSubcategories(String parentId) {
+    return _db.getSubcategories(parentId);
+  }
+
+  @override
+  Future<List<CategoryModel>> getCategoryAncestors(String categoryId) {
+    return _db.getCategoryAncestors(categoryId);
   }
 
   @override

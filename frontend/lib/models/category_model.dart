@@ -101,23 +101,30 @@ class CategoryModel {
 
   final String id;
   final String name;
+  final String? parentId;
   final String iconName;
   final String colorHex;
   final String description;
   final bool isSystem;
   final int orderIndex;
   final int screenshotCount;
+  final List<CategoryModel> subCategories;
 
   const CategoryModel({
     required this.id,
     required this.name,
+    this.parentId,
     required this.iconName,
     required this.colorHex,
     this.description = '',
     this.isSystem = true,
     this.orderIndex = 0,
     this.screenshotCount = 0,
+    this.subCategories = const [],
   });
+
+  bool get isRoot => parentId == null || parentId!.isEmpty;
+  bool get hasSubfolders => subCategories.isNotEmpty;
 
   Color get color {
     try {
@@ -135,16 +142,28 @@ class CategoryModel {
     if (lowerIcon.contains('receipt') || lowerName.contains('receipt') || lowerName.contains('invoice')) {
       return Icons.receipt_long_rounded;
     }
+    if (lowerIcon.contains('payroll') || lowerName.contains('payroll') || lowerName.contains('salary')) {
+      return Icons.payments_outlined;
+    }
+    if (lowerIcon.contains('project') || lowerName.contains('project') || lowerName.contains('work')) {
+      return Icons.folder_special_rounded;
+    }
+    if (lowerIcon.contains('learning') || lowerName.contains('learning') || lowerName.contains('tutorial') || lowerName.contains('study') || lowerName.contains('course')) {
+      return Icons.school_outlined;
+    }
+    if (lowerIcon.contains('shoes') || lowerName.contains('shoes') || lowerName.contains('fashion')) {
+      return Icons.roller_skating_outlined;
+    }
     if (lowerIcon.contains('account_balance') || lowerIcon.contains('finance') || lowerName.contains('finance') || lowerName.contains('banking')) {
       return Icons.account_balance_wallet_outlined;
     }
-    if (lowerIcon.contains('forum') || lowerIcon.contains('chat') || lowerIcon.contains('social') || lowerName.contains('social') || lowerName.contains('chat')) {
+    if (lowerIcon.contains('forum') || lowerIcon.contains('chat') || lowerIcon.contains('social') || lowerName.contains('social') || lowerName.contains('chat') || lowerName.contains('whatsapp')) {
       return Icons.chat_bubble_outline_rounded;
     }
-    if (lowerIcon.contains('code') || lowerName.contains('code') || lowerName.contains('tech') || lowerName.contains('dev')) {
+    if (lowerIcon.contains('code') || lowerName.contains('code') || lowerName.contains('tech') || lowerName.contains('dev') || lowerName.contains('flutter')) {
       return Icons.code_rounded;
     }
-    if (lowerIcon.contains('description') || lowerIcon.contains('document') || lowerName.contains('document') || lowerName.contains('id')) {
+    if (lowerIcon.contains('description') || lowerIcon.contains('document') || lowerName.contains('document') || lowerName.contains('id') || lowerName.contains('passport')) {
       return Icons.description_outlined;
     }
     if (lowerIcon.contains('sentiment') || lowerIcon.contains('meme') || lowerName.contains('meme') || lowerName.contains('humor')) {
@@ -153,10 +172,10 @@ class CategoryModel {
     if (lowerIcon.contains('note') || lowerName.contains('note') || lowerName.contains('knowledge')) {
       return Icons.edit_note_rounded;
     }
-    if (lowerIcon.contains('shopping') || lowerName.contains('shopping') || lowerName.contains('wishlist')) {
+    if (lowerIcon.contains('shopping') || lowerName.contains('shopping') || lowerName.contains('wishlist') || lowerName.contains('amazon')) {
       return Icons.shopping_bag_outlined;
     }
-    if (lowerIcon.contains('flight') || lowerIcon.contains('travel') || lowerName.contains('travel') || lowerName.contains('ticket')) {
+    if (lowerIcon.contains('flight') || lowerIcon.contains('travel') || lowerName.contains('travel') || lowerName.contains('ticket') || lowerName.contains('flight')) {
       return Icons.flight_takeoff_rounded;
     }
     if (lowerIcon.contains('help') || lowerName.contains('unsorted')) {
@@ -169,22 +188,26 @@ class CategoryModel {
   CategoryModel copyWith({
     String? id,
     String? name,
+    String? parentId,
     String? iconName,
     String? colorHex,
     String? description,
     bool? isSystem,
     int? orderIndex,
     int? screenshotCount,
+    List<CategoryModel>? subCategories,
   }) {
     return CategoryModel(
       id: id ?? this.id,
       name: name ?? this.name,
+      parentId: parentId ?? this.parentId,
       iconName: iconName ?? this.iconName,
       colorHex: colorHex ?? this.colorHex,
       description: description ?? this.description,
       isSystem: isSystem ?? this.isSystem,
       orderIndex: orderIndex ?? this.orderIndex,
       screenshotCount: screenshotCount ?? this.screenshotCount,
+      subCategories: subCategories ?? this.subCategories,
     );
   }
 
@@ -192,6 +215,7 @@ class CategoryModel {
     return {
       'id': id,
       'name': name,
+      'parent_id': parentId,
       'icon_name': iconName,
       'color_hex': colorHex,
       'description': description,
@@ -200,9 +224,10 @@ class CategoryModel {
     };
   }
 
-  factory CategoryModel.fromMap(Map<String, dynamic> map, [int count = 0]) {
+  factory CategoryModel.fromMap(Map<String, dynamic> map, [int count = 0, List<CategoryModel> subs = const []]) {
     final rawId = map['id']?.toString() ?? '';
     final rawName = map['name'] as String? ?? '';
+    final rawParentId = map['parent_id']?.toString() ?? map['parentCategoryId']?.toString();
     final rawIcon = map['icon_name'] as String? ?? map['icon'] as String? ?? 'folder';
     final rawColor = map['color_hex'] as String? ?? map['color'] as String? ?? '6366F1';
     final rawDesc = map['description'] as String? ?? '';
@@ -214,12 +239,14 @@ class CategoryModel {
     return CategoryModel(
       id: rawId,
       name: rawName,
+      parentId: rawParentId,
       iconName: rawIcon,
       colorHex: rawColor,
       description: rawDesc,
       isSystem: isSys,
       orderIndex: rawOrder,
       screenshotCount: count,
+      subCategories: subs,
     );
   }
 

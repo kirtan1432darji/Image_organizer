@@ -86,7 +86,9 @@ class AiCategoryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${category.screenshotCount} screenshots',
+                    category.hasSubfolders
+                        ? '${category.screenshotCount} items • ${category.subCategories.length} subfolders'
+                        : '${category.screenshotCount} screenshots',
                     style: theme.textTheme.bodySmall?.copyWith(
                       fontSize: 11,
                       color: theme.colorScheme.onSurface.withValues(alpha: 0.55),

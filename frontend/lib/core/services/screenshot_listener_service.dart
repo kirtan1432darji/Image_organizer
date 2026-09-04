@@ -236,7 +236,7 @@ class ScreenshotListenerService {
         }
       }
 
-      // 4c. Fallback to on-device semantic keyword classification
+      // 4c. Fallback to on-device semantic keyword classification & dynamic Smart Folders
       if (!remoteSuccess) {
         final localClass = _classifier.classifyMediaItem(
           fileName: item.fileName,
@@ -245,7 +245,6 @@ class ScreenshotListenerService {
           ocrText: extractedText,
         );
 
-        targetCatName = localClass.categoryName;
         subcategory = localClass.subcategory;
         confidence = localClass.confidence;
 
@@ -257,14 +256,10 @@ class ScreenshotListenerService {
           ));
         }
 
-        // Map category name to existing SQLite category
-        final existingCats = await _db.getCategories();
-        final match = existingCats.firstWhere(
-          (c) => c.name.toLowerCase() == targetCatName.toLowerCase(),
-          orElse: () => CategoryModel.unsortedCategory,
-        );
-        targetCatId = match.id;
-        targetCatName = match.name;
+        // Dynamically resolve or create the folder hierarchy in SQLite
+        final targetCat = await _db.getOrCreateFolderHierarchy(localClass.folderPath);
+        targetCatId = targetCat.id;
+        targetCatName = targetCat.name;
       }
 
       // 5. Smart Folder & Category Update

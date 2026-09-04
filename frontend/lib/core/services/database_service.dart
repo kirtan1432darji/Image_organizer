@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:uuid/uuid.dart';
 import '../constants/app_constants.dart';
 import '../../models/category_model.dart';
 import '../../models/screenshot_model.dart';
@@ -25,20 +26,33 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, AppConstants.databaseName);
 
-    return await openDatabase(
+    final db = await openDatabase(
       path,
       version: AppConstants.databaseVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
+
+    // Schema migration check: ensure parent_id exists on categories table
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(categories)');
+      final hasParentId = info.any((col) => col['name'] == 'parent_id');
+      if (!hasParentId) {
+        await db.execute('ALTER TABLE categories ADD COLUMN parent_id TEXT');
+      }
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)');
+    } catch (_) {}
+
+    return db;
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    // 1. Categories table
+    // 1. Categories table with hierarchical parent_id support
     await db.execute('''
       CREATE TABLE categories (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
+        parent_id TEXT,
         icon_name TEXT NOT NULL,
         color_hex TEXT NOT NULL,
         description TEXT,
@@ -46,6 +60,7 @@ class DatabaseService {
         order_index INTEGER NOT NULL DEFAULT 0
       )
     ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)');
 
     // 2. Folders table
     await db.execute('''
@@ -143,6 +158,29 @@ class DatabaseService {
 
   // ==================== SCREENSHOTS ====================
 
+  Future<List<String>> _getCategoryAndDescendantIds(Database db, String categoryId) async {
+    final result = <String>{categoryId};
+    final queue = <String>[categoryId];
+
+    while (queue.isNotEmpty) {
+      final current = queue.removeAt(0);
+      final children = await db.query(
+        'categories',
+        columns: ['id'],
+        where: 'parent_id = ?',
+        whereArgs: [current],
+      );
+      for (final child in children) {
+        final childId = child['id'] as String;
+        if (result.add(childId)) {
+          queue.add(childId);
+        }
+      }
+    }
+
+    return result.toList();
+  }
+
   Future<List<ScreenshotModel>> getAllScreenshots({
     String? categoryId,
     bool? isFavorite,
@@ -156,8 +194,10 @@ class DatabaseService {
 
     final conditions = <String>[];
     if (categoryId != null && categoryId != 'all') {
-      conditions.add('category_id = ?');
-      whereArgs.add(categoryId);
+      final descendantIds = await _getCategoryAndDescendantIds(db, categoryId);
+      final placeholders = List.filled(descendantIds.length, '?').join(', ');
+      conditions.add('category_id IN ($placeholders)');
+      whereArgs.addAll(descendantIds);
     }
     if (isFavorite != null && isFavorite) {
       conditions.add('is_favorite = 1');
@@ -412,94 +452,237 @@ class DatabaseService {
 
   // ==================== CATEGORIES ====================
 
-  Future<List<CategoryModel>> getCategories() async {
+  // ==================== CATEGORIES & DYNAMIC SMART FOLDERS ====================
+
+  /// Fetches categories. If [rootOnly] is true, returns only top-level categories.
+  /// If [parentId] is supplied, returns direct subcategories of that parent.
+  /// Calculates recursive screenshot counts across all descendant folders.
+  Future<List<CategoryModel>> getCategories({String? parentId, bool rootOnly = false}) async {
     final db = await database;
 
-    // 1. Single grouped query for exact ID counts
+    // 1. Direct screenshot count per category ID
     final idCountResults = await db.rawQuery('''
       SELECT category_id, COUNT(*) as count 
       FROM screenshots 
-      WHERE is_mock = 0 
+      WHERE is_mock = 0 AND category_id IS NOT NULL AND category_id != ''
       GROUP BY category_id
     ''');
-    final idCounts = <String, int>{};
+    final directCounts = <String, int>{};
     for (final row in idCountResults) {
-      final catId = row['category_id'] as String?;
+      final catId = (row['category_id'] as String?)?.toLowerCase();
       final count = row['count'] as int? ?? 0;
       if (catId != null && catId.isNotEmpty) {
-        idCounts[catId.toLowerCase()] = count;
+        directCounts[catId] = count;
       }
     }
 
-    // 2. Fallback grouped query for category name counts
-    final nameCountResults = await db.rawQuery('''
-      SELECT LOWER(category_name) as lower_name, COUNT(*) as count 
-      FROM screenshots 
-      WHERE is_mock = 0 AND category_name IS NOT NULL
-      GROUP BY LOWER(category_name)
-    ''');
-    final nameCounts = <String, int>{};
-    for (final row in nameCountResults) {
-      final name = row['lower_name'] as String?;
-      final count = row['count'] as int? ?? 0;
-      if (name != null && name.isNotEmpty) {
-        nameCounts[name] = count;
+    // 2. Fetch all category rows to compute tree hierarchy & recursive counts
+    final allCategoryRows = await db.query('categories', orderBy: 'order_index ASC, name ASC');
+
+    // Build parent -> children map and category lookup
+    final childrenMap = <String, List<String>>{};
+    for (final r in allCategoryRows) {
+      final id = r['id'] as String;
+      final pid = r['parent_id'] as String?;
+      if (pid != null && pid.isNotEmpty) {
+        childrenMap.putIfAbsent(pid, () => []).add(id);
       }
     }
 
-    // 3. Ensure all default categories are seeded in SQLite
-    List<Map<String, dynamic>> maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
-    if (maps.length <= 1) {
-      for (final cat in CategoryModel.defaultCategories) {
-        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+    // Helper for recursive count computation
+    int computeRecursiveCount(String catId) {
+      int total = directCounts[catId.toLowerCase()] ?? 0;
+      final children = childrenMap[catId] ?? [];
+      for (final childId in children) {
+        total += computeRecursiveCount(childId);
       }
-      await autoClassifyAndOrganizeScreenshots();
-      // Re-run count queries
-      final updatedIdCounts = await db.rawQuery('SELECT category_id, COUNT(*) as count FROM screenshots WHERE is_mock = 0 GROUP BY category_id');
-      for (final row in updatedIdCounts) {
-        final catId = row['category_id'] as String?;
-        final count = row['count'] as int? ?? 0;
-        if (catId != null && catId.isNotEmpty) {
-          idCounts[catId.toLowerCase()] = count;
+      return total;
+    }
+
+    // Filter which categories to return
+    final filteredRows = <Map<String, dynamic>>[];
+    for (final r in allCategoryRows) {
+      final pid = r['parent_id'] as String?;
+      if (rootOnly) {
+        if (pid == null || pid.isEmpty) {
+          filteredRows.add(r);
         }
+      } else if (parentId != null) {
+        if (pid == parentId) {
+          filteredRows.add(r);
+        }
+      } else {
+        filteredRows.add(r);
       }
-      maps = await db.query('categories', orderBy: 'order_index ASC, name ASC');
     }
 
     final categories = <CategoryModel>[];
     bool hasUnsorted = false;
 
-    for (final map in maps) {
-      final id = (map['id'] as String).toLowerCase();
+    for (final map in filteredRows) {
+      final id = map['id'] as String;
       final name = (map['name'] as String? ?? '').toLowerCase();
-      if (id == CategoryModel.unsortedId || name == CategoryModel.unsortedName.toLowerCase()) {
+      if (id.toLowerCase() == CategoryModel.unsortedId || name == CategoryModel.unsortedName.toLowerCase()) {
         hasUnsorted = true;
       }
 
-      int count = idCounts[id] ?? 0;
-      if (count == 0 && nameCounts.containsKey(name)) {
-        count = nameCounts[name] ?? 0;
-      }
+      final totalCount = computeRecursiveCount(id);
 
-      categories.add(CategoryModel.fromMap(map, count));
+      // Fetch immediate subcategories as models
+      final immediateChildren = (childrenMap[id] ?? [])
+          .map((cid) {
+            final childRow = allCategoryRows.firstWhere(
+              (cr) => cr['id'] == cid,
+              orElse: () => <String, dynamic>{},
+            );
+            if (childRow.isEmpty) return null;
+            return CategoryModel.fromMap(childRow, computeRecursiveCount(cid));
+          })
+          .whereType<CategoryModel>()
+          .toList();
+
+      categories.add(CategoryModel.fromMap(map, totalCount, immediateChildren));
     }
 
-    // 4. Ensure Unsorted category is always included
-    if (!hasUnsorted) {
-      int unsortedCount = idCounts[CategoryModel.unsortedId] ?? 0;
-      if (unsortedCount == 0 && nameCounts.containsKey(CategoryModel.unsortedName.toLowerCase())) {
-        unsortedCount = nameCounts[CategoryModel.unsortedName.toLowerCase()] ?? 0;
-      }
+    // If rootOnly or viewing all, ensure Unsorted is included
+    if ((rootOnly || parentId == null) && !hasUnsorted) {
+      final unsortedCount = directCounts[CategoryModel.unsortedId] ?? 0;
       categories.add(CategoryModel.unsortedCategory.copyWith(screenshotCount: unsortedCount));
     }
 
     return categories;
   }
 
+  /// Returns only root (top-level) Smart Folders
+  Future<List<CategoryModel>> getRootCategories() => getCategories(rootOnly: true);
+
+  /// Returns subfolders of a specific category
+  Future<List<CategoryModel>> getSubcategories(String parentId) => getCategories(parentId: parentId);
+
+  /// Traverses up from [categoryId] to the root to build clickable breadcrumbs
+  Future<List<CategoryModel>> getCategoryAncestors(String categoryId) async {
+    final db = await database;
+    final ancestors = <CategoryModel>[];
+    String? currentId = categoryId;
+
+    while (currentId != null && currentId.isNotEmpty && currentId != 'all' && currentId != CategoryModel.unsortedId) {
+      final rows = await db.query('categories', where: 'id = ?', whereArgs: [currentId]);
+      if (rows.isEmpty) break;
+      final cat = CategoryModel.fromMap(rows.first);
+      ancestors.insert(0, cat);
+      currentId = cat.parentId;
+    }
+
+    return ancestors;
+  }
+
+  /// Automatically retrieves or creates the folder hierarchy in SQLite.
+  /// Given ['Projects', 'NHDC', 'Payroll'], it finds or creates:
+  /// - Projects (root)
+  ///   - NHDC (subfolder of Projects)
+  ///     - Payroll (subfolder of NHDC)
+  /// Returns the leaf CategoryModel.
+  Future<CategoryModel> getOrCreateFolderHierarchy(List<String> folderSegments) async {
+    final db = await database;
+    if (folderSegments.isEmpty) {
+      return CategoryModel.unsortedCategory;
+    }
+
+    String? currentParentId;
+    CategoryModel? currentCategory;
+
+    for (int i = 0; i < folderSegments.length; i++) {
+      final segment = folderSegments[i].trim();
+      if (segment.isEmpty) continue;
+
+      List<Map<String, dynamic>> matches;
+      if (currentParentId == null) {
+        matches = await db.query(
+          'categories',
+          where: 'LOWER(name) = LOWER(?) AND (parent_id IS NULL OR parent_id = \'\')',
+          whereArgs: [segment],
+          limit: 1,
+        );
+      } else {
+        matches = await db.query(
+          'categories',
+          where: 'LOWER(name) = LOWER(?) AND parent_id = ?',
+          whereArgs: [segment, currentParentId],
+          limit: 1,
+        );
+      }
+
+      if (matches.isNotEmpty) {
+        currentCategory = CategoryModel.fromMap(matches.first);
+        currentParentId = currentCategory.id;
+      } else {
+        // Create new dynamic category
+        final cleanSlug = segment.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
+        const uuid = Uuid();
+        final newId = 'folder_${cleanSlug}_${uuid.v4().substring(0, 8)}';
+        final iconName = _inferCategoryIcon(segment);
+        final colorHex = _inferCategoryColor(segment);
+
+        final newCat = CategoryModel(
+          id: newId,
+          name: segment,
+          parentId: currentParentId,
+          iconName: iconName,
+          colorHex: colorHex,
+          description: i == 0 ? 'Smart Folder: $segment' : 'Subfolder of ${currentCategory?.name ?? "Root"}',
+          isSystem: false,
+          orderIndex: 50 + i,
+        );
+
+        await db.insert(
+          'categories',
+          newCat.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+
+        currentCategory = newCat;
+        currentParentId = newId;
+      }
+    }
+
+    return currentCategory ?? CategoryModel.unsortedCategory;
+  }
+
+  String _inferCategoryIcon(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('project') || lower.contains('work')) return 'folder_special';
+    if (lower.contains('payroll') || lower.contains('salary')) return 'payments';
+    if (lower.contains('shop') || lower.contains('amazon')) return 'shopping_bag';
+    if (lower.contains('shoe') || lower.contains('fashion')) return 'roller_skating';
+    if (lower.contains('learn') || lower.contains('tutorial') || lower.contains('study')) return 'school';
+    if (lower.contains('code') || lower.contains('tech') || lower.contains('flutter')) return 'code';
+    if (lower.contains('flight') || lower.contains('travel') || lower.contains('ticket')) return 'flight_takeoff';
+    if (lower.contains('finance') || lower.contains('bank') || lower.contains('upi')) return 'account_balance_wallet';
+    if (lower.contains('chat') || lower.contains('social') || lower.contains('whatsapp')) return 'chat_bubble_outline';
+    if (lower.contains('doc') || lower.contains('id') || lower.contains('passport')) return 'description';
+    if (lower.contains('meme') || lower.contains('humor')) return 'sentiment_satisfied_alt';
+    return 'folder';
+  }
+
+  String _inferCategoryColor(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('project') || lower.contains('work')) return '6366F1';
+    if (lower.contains('payroll') || lower.contains('salary')) return '10B981';
+    if (lower.contains('shop') || lower.contains('amazon')) return 'F97316';
+    if (lower.contains('shoe') || lower.contains('fashion')) return 'EC4899';
+    if (lower.contains('learn') || lower.contains('tutorial')) return '8B5CF6';
+    if (lower.contains('code') || lower.contains('tech') || lower.contains('flutter')) return '06B6D4';
+    if (lower.contains('flight') || lower.contains('travel')) return '3B82F6';
+    if (lower.contains('finance') || lower.contains('bank')) return '10B981';
+    if (lower.contains('social') || lower.contains('whatsapp')) return '22C55E';
+    if (lower.contains('doc') || lower.contains('id')) return 'F59E0B';
+    if (lower.contains('meme')) return 'EAB308';
+    return '6366F1';
+  }
+
   Future<void> upsertCategory(CategoryModel category) async {
     final db = await database;
 
-    // Check if an old category exists with the same name but different id (e.g. old string ID)
     final existingWithSameName = await db.query(
       'categories',
       where: 'LOWER(name) = LOWER(?) AND id != ?',
@@ -509,14 +692,12 @@ class DatabaseService {
     if (existingWithSameName.isNotEmpty) {
       for (final oldRow in existingWithSameName) {
         final oldId = oldRow['id'] as String;
-        // Re-link screenshots that had old ID to new canonical ID
         await db.update(
           'screenshots',
           {'category_id': category.id, 'category_name': category.name},
           where: 'category_id = ?',
           whereArgs: [oldId],
         );
-        // Delete old row
         await db.delete(
           'categories',
           where: 'id = ?',
@@ -547,69 +728,31 @@ class DatabaseService {
       where: "file_path LIKE 'assets/mock_screenshots%' OR is_mock = 1",
     );
 
-    // 2. Map old mock category IDs to backend category names
-    final oldMockMap = {
-      'receipts': 'Receipts & Invoices',
-      'social': 'Social & Chat',
-      'social & chats': 'Social & Chat',
-      'finance': 'Finance & Banking',
-      'documents': 'Documents & IDs',
-      'work': 'Documents & IDs',
-      'code': 'Code & Tech',
-      'memes': 'Memes & Humor',
-      'notes': 'Notes & Knowledge',
-      'shopping': 'Shopping & Wishlist',
-      'travel': 'Travel & Tickets',
-    };
-
-    // 3. For each canonical category, update screenshots that have matching name or old mock ID
-    for (final cat in canonicalCategories) {
-      final matchingOldIds = <String>[cat.id];
-      for (final entry in oldMockMap.entries) {
-        if (entry.value.toLowerCase() == cat.name.toLowerCase()) {
-          matchingOldIds.add(entry.key);
-        }
-      }
-
-      for (final oldId in matchingOldIds) {
-        await db.update(
-          'screenshots',
-          {'category_id': cat.id, 'category_name': cat.name},
-          where: '(category_id = ? OR LOWER(category_name) = LOWER(?)) AND category_id != ? AND is_mock = 0',
-          whereArgs: [oldId, cat.name, cat.id],
-        );
-      }
-    }
-
-    // 4. Auto-classify all unsorted screenshots into appropriate Categories & Subcategories
-    await autoClassifyAndOrganizeScreenshots();
+    // 2. Auto-classify and re-organize screenshots into dynamic hierarchical Smart Folders
+    await autoClassifyAndOrganizeScreenshots(forceReclassifyAll: false);
   }
 
-  /// Automatically categorizes and organizes all unsorted screenshots into proper Category & Subcategory folders
-  Future<int> autoClassifyAndOrganizeScreenshots() async {
+  /// Automatically categorizes and organizes all screenshots into proper dynamic hierarchical Smart Folders.
+  /// If [forceReclassifyAll] is true, re-evaluates all screenshots.
+  Future<int> autoClassifyAndOrganizeScreenshots({bool forceReclassifyAll = false}) async {
     final db = await database;
     const classifier = MediaClassifier();
 
-    // 1. Ensure all default categories exist in SQLite
-    var catRows = await db.query('categories');
-    if (catRows.length <= 1) {
-      for (final cat in CategoryModel.defaultCategories) {
-        await db.insert('categories', cat.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
-      }
-      catRows = await db.query('categories');
+    final String whereClause;
+    final List<dynamic> whereArgs;
+
+    if (forceReclassifyAll) {
+      whereClause = 'is_mock = 0';
+      whereArgs = [];
+    } else {
+      whereClause = 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\' OR category_name = \'Notes & Knowledge\' OR subcategory IS NULL OR subcategory = \'\' OR subcategory = \'General\')';
+      whereArgs = [CategoryModel.unsortedId, CategoryModel.unsortedName];
     }
 
-    final catMap = <String, CategoryModel>{};
-    for (final r in catRows) {
-      final c = CategoryModel.fromMap(r);
-      catMap[c.name.toLowerCase()] = c;
-    }
-
-    // 2. Fetch all screenshots needing proper folder organization
     final items = await db.query(
       'screenshots',
-      where: 'is_mock = 0 AND (category_id = ? OR category_id = \'\' OR category_id IS NULL OR category_name = ? OR category_name = \'\' OR subcategory IS NULL OR subcategory = \'\')',
-      whereArgs: [CategoryModel.unsortedId, CategoryModel.unsortedName],
+      where: whereClause,
+      whereArgs: whereArgs,
     );
 
     int organized = 0;
@@ -628,15 +771,14 @@ class DatabaseService {
         ocrText: ocrText,
       );
 
-      final targetCat = catMap[result.categoryName.toLowerCase()];
-      final targetCatId = targetCat?.id ?? CategoryModel.unsortedId;
-      final targetCatName = targetCat?.name ?? result.categoryName;
+      // Dynamically resolve or create the folder hierarchy
+      final targetCat = await getOrCreateFolderHierarchy(result.folderPath);
 
       await db.update(
         'screenshots',
         {
-          'category_id': targetCatId,
-          'category_name': targetCatName,
+          'category_id': targetCat.id,
+          'category_name': targetCat.name,
           'subcategory': result.subcategory,
           'confidence': result.confidence,
           'is_reviewed': result.confidence >= 0.85 ? 1 : 0,
