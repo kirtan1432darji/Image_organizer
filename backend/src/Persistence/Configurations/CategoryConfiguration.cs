@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using AI.ScreenshotOrganizer.Domain.Entities;
 
@@ -14,6 +14,10 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
         builder.Property(c => c.Name).IsRequired().HasMaxLength(100);
         builder.Property(c => c.Icon).HasMaxLength(50);
         builder.Property(c => c.Color).HasMaxLength(20);
+        builder.Property(c => c.DisplayOrder).HasDefaultValue(0);
+        builder.Property(c => c.Description).HasMaxLength(500);
+
+        builder.Property(c => c.RowVersion).IsRowVersion();
 
         builder.HasOne(c => c.ParentCategory)
             .WithMany(p => p.SubCategories)
@@ -21,5 +25,8 @@ public class CategoryConfiguration : IEntityTypeConfiguration<Category>
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasIndex(c => new { c.Name, c.UserId });
+        builder.HasIndex(c => new { c.ParentCategoryId, c.DisplayOrder, c.Name });
+
+        builder.HasQueryFilter(c => !c.IsDeleted);
     }
 }

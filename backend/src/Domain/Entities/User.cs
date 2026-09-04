@@ -1,4 +1,4 @@
-﻿using AI.ScreenshotOrganizer.Domain.Common;
+using AI.ScreenshotOrganizer.Domain.Common;
 
 namespace AI.ScreenshotOrganizer.Domain.Entities;
 
@@ -13,4 +13,13 @@ public class User : BaseEntity
     public ICollection<Screenshot> Screenshots { get; set; } = new List<Screenshot>();
     public ICollection<Category> Categories { get; set; } = new List<Category>();
     public ICollection<Tag> Tags { get; set; } = new List<Tag>();
+    public ICollection<DeviceInfo> Devices { get; set; } = new List<DeviceInfo>();
+    public ICollection<AppSetting> Settings { get; set; } = new List<AppSetting>();
+    public ICollection<FolderContext> FolderContexts { get; set; } = new List<FolderContext>();
+    public ICollection<ScreenshotEntity> ExtractedEntities { get; set; } = new List<ScreenshotEntity>();
+    public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
+    public ICollection<ChatHistory> ChatHistories { get; set; } = new List<ChatHistory>();
+    public ICollection<SearchHistory> SearchHistories { get; set; } = new List<SearchHistory>();
+    public ICollection<Collection> Collections { get; set; } = new List<Collection>();
+    public ICollection<NotificationHistory> Notifications { get; set; } = new List<NotificationHistory>();
 }
