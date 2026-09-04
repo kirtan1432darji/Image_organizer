@@ -51,6 +51,66 @@ class SyncService {
 
   Future<void> _processItem(SyncQueueItemModel item) async {
     final payload = item.payload;
+    final endpoint = item.endpoint;
+
+    // Handle batch or single scan synchronization with ASP.NET Core backend
+    if (endpoint == '/screenshots/batch' || endpoint == '/screenshots/scan') {
+      final screenshotsList = payload['screenshots'] as List?;
+      if (screenshotsList != null && screenshotsList.isNotEmpty) {
+        final items = screenshotsList.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        final batchRes = await _apiClient.batchScanScreenshots(items);
+        if (batchRes.isSuccess) {
+          for (final itemMap in items) {
+            final id = itemMap['screenshot_id'] ?? itemMap['id'] ?? itemMap['device_asset_id'];
+            if (id != null) {
+              final sc = await _db.getScreenshotById(id.toString());
+              if (sc != null) {
+                await _db.updateScreenshot(sc.copyWith(isSynced: true));
+              }
+            }
+          }
+          return;
+        }
+      } else {
+        // Single screenshot scan payload
+        final assetId = (payload['device_asset_id'] ?? payload['image_id'] ?? payload['screenshot_id']) as String?;
+        final filePath = (payload['file_path'] ?? payload['image_path']) as String? ?? '';
+        final fileName = payload['file_name'] as String? ?? '';
+        final ocrText = payload['ocr_text'] as String? ?? '';
+        final sourceApp = payload['source_app'] as String? ?? 'Screenshot';
+        final width = (payload['width'] as num?)?.toInt() ?? 1080;
+        final height = (payload['height'] as num?)?.toInt() ?? 2400;
+        final fileSize = (payload['file_size'] as num?)?.toInt() ?? 0;
+        final hash = payload['hash'] as String?;
+
+        if (assetId != null) {
+          final scanRes = await _apiClient.scanScreenshotMetadata(
+            imageId: assetId,
+            imagePath: filePath,
+            fileName: fileName,
+            fileSize: fileSize,
+            capturedDate: DateTime.tryParse(payload['captured_date']?.toString() ?? '') ?? DateTime.now(),
+            sourceApp: sourceApp,
+            width: width,
+            height: height,
+            ocrText: ocrText,
+            hash: hash,
+            autoClassify: true,
+          );
+
+          if (scanRes.isSuccess) {
+            final screenshotId = payload['screenshot_id'] as String? ?? assetId;
+            final sc = await _db.getScreenshotById(screenshotId);
+            if (sc != null) {
+              await _db.updateScreenshot(sc.copyWith(isSynced: true));
+            }
+            return;
+          }
+        }
+      }
+    }
+
+    // Default classification sync fallback
     final screenshotId = payload['screenshot_id'] as String?;
     final fileName = payload['file_name'] as String? ?? '';
     final ocrText = payload['ocr_text'] as String? ?? '';

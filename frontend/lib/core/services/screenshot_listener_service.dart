@@ -26,6 +26,7 @@ class ScreenshotListenerService {
   final SyncService _syncService;
 
   final Set<String> _processedAssetIds = <String>{};
+  final Set<String> _processedHashes = <String>{};
   StreamSubscription<DiscoveredScreenshot>? _subscription;
   bool _isListening = false;
   bool notificationsEnabled = true;
@@ -79,9 +80,12 @@ class ScreenshotListenerService {
   Future<void> _processNewScreenshot(DiscoveredScreenshot item) async {
     final assetId = item.deviceAssetId;
     final filePath = item.filePath;
+    final fileHash = '${filePath}_${item.fileSize}_${item.createdAt.millisecondsSinceEpoch}'.hashCode.toRadixString(16);
 
-    // 1. Duplicate Detection: In-memory check
-    if (_processedAssetIds.contains(assetId) || _processedAssetIds.contains(filePath)) {
+    // 1. Duplicate Detection: In-memory check (by asset ID, file path, and file hash)
+    if (_processedAssetIds.contains(assetId) ||
+        _processedAssetIds.contains(filePath) ||
+        _processedHashes.contains(fileHash)) {
       return;
     }
 
@@ -93,13 +97,15 @@ class ScreenshotListenerService {
     if (alreadyExists) {
       _processedAssetIds.add(assetId);
       _processedAssetIds.add(filePath);
+      _processedHashes.add(fileHash);
       return;
     }
 
     _processedAssetIds.add(assetId);
     _processedAssetIds.add(filePath);
+    _processedHashes.add(fileHash);
 
-    debugPrint('[ScreenshotListenerService] New screenshot detected: ${item.fileName}');
+    debugPrint('[ScreenshotListenerService] New screenshot detected: ${item.fileName} (hash: $fileHash)');
 
     try {
       final screenshotId = const Uuid().v4();
@@ -129,7 +135,7 @@ class ScreenshotListenerService {
 
       await _db.insertScreenshot(initialModel);
 
-      // 3. OCR Trigger
+      // 3. OCR Trigger (Google ML Kit on device)
       String extractedText = '';
       double ocrConfidence = 0.85;
 
@@ -146,44 +152,91 @@ class ScreenshotListenerService {
         debugPrint('[ScreenshotListenerService] OCR error: $e');
       }
 
-      // 4. AI Classification Trigger
+      // 4. AI Classification & Backend Sync Trigger
       String targetCatId = CategoryModel.unsortedId;
       String targetCatName = CategoryModel.unsortedName;
       String subcategory = 'General';
       double confidence = ocrConfidence;
       final tags = <TagModel>[];
 
-      // Try remote API classification first
+      // 4a. Send OCR text and screenshot metadata to existing .NET API (POST /api/screenshots/scan)
       bool remoteSuccess = false;
       try {
-        final remoteRes = await _apiClient.classifyScreenshot(
-          screenshotId: screenshotId,
+        final scanRes = await _apiClient.scanScreenshotMetadata(
+          imageId: assetId,
+          imagePath: filePath,
           fileName: item.fileName,
+          fileSize: item.fileSize,
+          capturedDate: item.createdAt,
+          sourceApp: initialModel.sourceApp ?? 'Screenshot',
+          width: initialModel.width,
+          height: initialModel.height,
           ocrText: extractedText,
-          sourceApp: initialModel.sourceApp ?? '',
+          hash: fileHash,
+          autoClassify: true,
         );
 
-        if (remoteRes.isSuccess) {
-          final data = remoteRes.dataOrNull!;
-          targetCatId = data.categoryId;
-          targetCatName = data.categoryName;
-          subcategory = data.subcategory;
-          confidence = data.confidence;
-
-          for (final tagStr in data.suggestedTags) {
-            tags.add(TagModel(
-              id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
-              name: tagStr,
-              colorHex: '6366F1',
-            ));
+        if (scanRes.isSuccess) {
+          final data = scanRes.dataOrNull;
+          if (data != null) {
+            if (data['category_name'] != null || data['categoryName'] != null) {
+              targetCatName = (data['category_name'] ?? data['categoryName']).toString();
+            }
+            if (data['category_id'] != null || data['categoryId'] != null) {
+              targetCatId = (data['category_id'] ?? data['categoryId']).toString();
+            }
+            if (data['sub_category_name'] != null || data['subCategoryName'] != null) {
+              subcategory = (data['sub_category_name'] ?? data['subCategoryName']).toString();
+            }
+            final remoteTags = (data['tags'] as List?)?.map((e) => e.toString()).toList();
+            if (remoteTags != null) {
+              for (final tagStr in remoteTags) {
+                tags.add(TagModel(
+                  id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
+                  name: tagStr,
+                  colorHex: '6366F1',
+                ));
+              }
+            }
           }
           remoteSuccess = true;
         }
       } catch (e) {
-        debugPrint('[ScreenshotListenerService] Remote AI classification unavailable: $e');
+        debugPrint('[ScreenshotListenerService] Remote scan upload error: $e');
       }
 
-      // Fallback to on-device semantic classification
+      // 4b. Fallback to /screenshots/classify if scan was unauthenticated/failed
+      if (!remoteSuccess) {
+        try {
+          final remoteRes = await _apiClient.classifyScreenshot(
+            screenshotId: screenshotId,
+            fileName: item.fileName,
+            ocrText: extractedText,
+            sourceApp: initialModel.sourceApp ?? '',
+          );
+
+          if (remoteRes.isSuccess) {
+            final data = remoteRes.dataOrNull!;
+            targetCatId = data.categoryId;
+            targetCatName = data.categoryName;
+            subcategory = data.subcategory;
+            confidence = data.confidence;
+
+            for (final tagStr in data.suggestedTags) {
+              tags.add(TagModel(
+                id: 'tag_${tagStr.toLowerCase().replaceAll(' ', '_')}',
+                name: tagStr,
+                colorHex: '6366F1',
+              ));
+            }
+            remoteSuccess = true;
+          }
+        } catch (e) {
+          debugPrint('[ScreenshotListenerService] Remote AI classification unavailable: $e');
+        }
+      }
+
+      // 4c. Fallback to on-device semantic keyword classification
       if (!remoteSuccess) {
         final localClass = _classifier.classifyMediaItem(
           fileName: item.fileName,
@@ -238,17 +291,29 @@ class ScreenshotListenerService {
         await _db.linkScreenshotTag(screenshotId, t.id);
       }
 
-      // Queue metadata for backend sync if remote was skipped
+      // Queue metadata for backend sync if remote was skipped / offline
       if (!remoteSuccess) {
         await _db.addToSyncQueue(
           SyncQueueItemModel(
             id: const Uuid().v4(),
-            endpoint: '/screenshots/batch',
+            endpoint: '/screenshots/scan',
             httpMethod: 'POST',
             payload: {
               'screenshot_id': screenshotId,
+              'device_asset_id': assetId,
+              'image_id': assetId,
+              'file_path': filePath,
               'file_name': item.fileName,
+              'file_size': item.fileSize,
+              'captured_date': item.createdAt.toIso8601String(),
+              'width': initialModel.width,
+              'height': initialModel.height,
               'ocr_text': extractedText,
+              'source_app': initialModel.sourceApp ?? 'Screenshot',
+              'hash': fileHash,
+              'category_id': targetCatId,
+              'category_name': targetCatName,
+              'sub_category_name': subcategory,
             },
             createdAt: DateTime.now(),
           ),
@@ -258,7 +323,7 @@ class ScreenshotListenerService {
       }
 
       debugPrint(
-        '[ScreenshotListenerService] Organized screenshot into $targetCatName / $subcategory',
+        '[ScreenshotListenerService] Organized screenshot into $targetCatName / $subcategory (synced: $remoteSuccess)',
       );
 
       // 6. Local Notification Trigger

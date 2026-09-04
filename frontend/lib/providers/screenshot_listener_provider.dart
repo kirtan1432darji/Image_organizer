@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/screenshot_listener_service.dart';
 import '../models/screenshot_model.dart';
 import 'category_provider.dart';
+import 'folder_provider.dart';
 import 'scanner_provider.dart';
 import 'screenshot_provider.dart';
 import 'settings_provider.dart';
@@ -166,6 +167,7 @@ class ScreenshotListenerNotifier extends StateNotifier<ScreenshotListenerState> 
     // Refresh UI providers across Home, Folders, and Dashboard stats
     _ref.read(screenshotListProvider.notifier).refresh();
     _ref.read(categoryListProvider.notifier).syncRemote();
+    _ref.invalidate(folderListProvider);
     _ref.invalidate(statsProvider);
     _ref.invalidate(recentScreenshotsProvider);
   }

@@ -197,6 +197,8 @@ class ApiClient {
   Future<Result<Map<String, dynamic>>> scanScreenshotMetadata({
     required String imageId, // Device asset ID
     required String imagePath,
+    String? fileName,
+    int? fileSize,
     String? thumbnailPath,
     required DateTime capturedDate,
     required String sourceApp,
@@ -204,22 +206,38 @@ class ApiClient {
     required int height,
     required String ocrText,
     String? visionDescription,
+    String? hash,
     bool autoClassify = true,
   }) async {
     try {
+      final name = fileName ?? (imagePath.isNotEmpty ? imagePath.split(RegExp(r'[/\\]')).last : '');
       final response = await _dio.post(
         ApiConstants.scanScreenshot,
         data: {
-          'imageId': imageId,
-          'imagePath': imagePath,
-          'thumbnailPath': thumbnailPath,
-          'capturedDate': capturedDate.toIso8601String(),
-          'sourceApp': sourceApp,
+          'device_asset_id': imageId,
+          'image_id': imageId,
+          'file_path': imagePath,
+          'image_path': imagePath,
+          'file_name': name,
+          'file_size': fileSize ?? 0,
+          'thumbnail_path': thumbnailPath,
+          'captured_date': capturedDate.toIso8601String(),
+          'created_at': capturedDate.toIso8601String(),
+          'source_app': sourceApp,
           'width': width,
           'height': height,
+          'ocr_text': ocrText,
+          'vision_description': visionDescription,
+          'hash': hash,
+          'auto_classify': autoClassify,
+          // camelCase aliases for flexibility
+          'imageId': imageId,
+          'imagePath': imagePath,
+          'fileName': name,
+          'fileSize': fileSize ?? 0,
+          'capturedDate': capturedDate.toIso8601String(),
+          'sourceApp': sourceApp,
           'ocrText': ocrText,
-          'visionDescription': visionDescription,
-          'autoClassify': autoClassify,
         },
       );
 
