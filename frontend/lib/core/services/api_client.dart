@@ -7,6 +7,7 @@ import 'auth_service.dart';
 import '../../models/auth_model.dart';
 import '../../models/category_model.dart';
 import '../../models/classification_result_model.dart';
+import '../../models/folder_context_model.dart';
 import '../../models/tag_model.dart';
 
 class ApiClient {
@@ -567,6 +568,38 @@ class ApiClient {
       return _handleDioError<Map<String, dynamic>>(e);
     } catch (e) {
       return Result.failure('Sync error: $e');
+    }
+  }
+
+  /// Fetch smart folder AI context (Sprint 1.4)
+  Future<Result<FolderContextModel>> fetchFolderContext(String categoryId) async {
+    try {
+      final response = await _dio.get(ApiConstants.folderContext(categoryId));
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(FolderContextModel.fromJson(unwrapped));
+      }
+      return Result.failure('Unexpected response format for folder context');
+    } on DioException catch (e) {
+      return _handleDioError(e);
+    } catch (e) {
+      return Result.failure('Failed to fetch folder context: $e');
+    }
+  }
+
+  /// Generate or refresh smart folder AI context (Sprint 1.4)
+  Future<Result<FolderContextModel>> generateFolderContext(String categoryId) async {
+    try {
+      final response = await _dio.post(ApiConstants.generateFolderContext(categoryId));
+      final unwrapped = _unwrapData(response.data);
+      if (unwrapped is Map<String, dynamic>) {
+        return Result.success(FolderContextModel.fromJson(unwrapped));
+      }
+      return Result.failure('Unexpected response format when generating folder context');
+    } on DioException catch (e) {
+      return _handleDioError(e);
+    } catch (e) {
+      return Result.failure('Failed to generate folder context: $e');
     }
   }
 

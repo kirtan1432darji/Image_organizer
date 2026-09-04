@@ -12,6 +12,8 @@ class AppRouteNames {
   
   // Sub routes
   static const String folderDetail = '/folders/:categoryId';
+  static const String folderContext = '/folders/:categoryId/context';
   static const String screenshotDetail = '/screenshots/:id';
   static const String privacyPolicy = '/settings/privacy';
 }
+

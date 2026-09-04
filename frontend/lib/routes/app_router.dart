@@ -10,6 +10,7 @@ import '../features/favorites/favorites_screen.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/settings/privacy_policy_screen.dart';
 import '../features/folders/folder_detail_screen.dart';
+import '../features/context/folder_context_screen.dart';
 import '../features/screenshot_detail/screenshot_detail_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey =
@@ -66,6 +67,18 @@ final GoRouter appRouter = GoRouter(
         final categoryId = state.pathParameters['categoryId'] ?? 'unsorted';
         final categoryName = state.extra as String? ?? 'Folder';
         return FolderDetailScreen(
+          categoryId: categoryId,
+          categoryName: categoryName,
+        );
+      },
+    ),
+    GoRoute(
+      path: AppRouteNames.folderContext,
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) {
+        final categoryId = state.pathParameters['categoryId'] ?? 'unsorted';
+        final categoryName = state.extra as String? ?? 'Folder';
+        return FolderContextScreen(
           categoryId: categoryId,
           categoryName: categoryName,
         );

@@ -34,9 +34,15 @@ class ApiConstants {
   static const String folders = '/folders';
   static const String syncFolders = '/folders/sync';
   
+  // Sprint 1.4 Folder Context Endpoints
+  static const String context = '/context';
+  static String folderContext(String categoryId) => '/context/$categoryId';
+  static String generateFolderContext(String categoryId) => '/context/generate/$categoryId';
+
   // Sync & Search Endpoints
   static const String sync = '/sync';
   static const String syncChanges = '/sync/changes';
   static const String semanticSearch = '/search';
   static const String healthCheck = '/health';
 }
+

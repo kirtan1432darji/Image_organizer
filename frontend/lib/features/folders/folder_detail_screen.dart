@@ -39,6 +39,13 @@ class _FolderDetailScreenState extends ConsumerState<FolderDetailScreen> {
         title: Text(widget.categoryName),
         actions: [
           IconButton(
+            icon: const Icon(Icons.auto_awesome_rounded, color: ColorConstants.primary),
+            tooltip: 'Folder Context',
+            onPressed: () {
+              context.push('/folders/${widget.categoryId}/context', extra: widget.categoryName);
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.tune_rounded),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -129,6 +136,90 @@ class _FolderDetailScreenState extends ConsumerState<FolderDetailScreen> {
                 },
                 loading: () => const SizedBox.shrink(),
                 error: (_, __) => const SizedBox.shrink(),
+              ),
+
+              // AI Context Space Banner
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? [const Color(0xFF1E293B), const Color(0xFF0F172A)]
+                        : [ColorConstants.primary.withValues(alpha: 0.08), Colors.white],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: ColorConstants.primary.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      context.push('/folders/${widget.categoryId}/context', extra: widget.categoryName);
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: ColorConstants.primary.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.auto_awesome, color: ColorConstants.primary, size: 20),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Folder Context Space',
+                                      style: theme.textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: ColorConstants.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: ColorConstants.primary.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: const Text(
+                                        'AI',
+                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ColorConstants.primary),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Explore AI summary, extracted tasks, dates & links',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 11,
+                                    color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded, color: ColorConstants.primary, size: 22),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
 
               // 2. Subfolders Carousel / List (if this folder has child folders)
